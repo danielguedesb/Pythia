@@ -69,6 +69,9 @@ class Config:
     loop_interval_sec: int = field(default_factory=lambda: _i("LOOP_INTERVAL_SEC", 900))
     sense_interval_sec: int = field(default_factory=lambda: _i("SENSE_INTERVAL_SEC", 180))
 
+    # ── Swarm (a council of LLM personas deliberates each forecast) ──
+    swarm_enabled: bool = field(default_factory=lambda: _b("SWARM_ENABLED", True))
+
     def summary(self) -> dict:
         return {
             "osiris_url": self.osiris_url,

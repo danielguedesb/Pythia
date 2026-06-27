@@ -41,17 +41,27 @@ class WorldBrief(BaseModel):
     top_events: list[str] = Field(default_factory=list)
 
 
+class AgentView(BaseModel):
+    """One swarm persona's take on a single prediction."""
+    name: str                           # Strategist | Economist | Naturalist | Skeptic
+    probability: float                  # 0..1, this agent's estimate
+    note: str = ""                      # terse rationale from its lens
+
+
 class Prediction(BaseModel):
     """A single forecast from the oracle about a future event."""
     id: str = Field(default_factory=lambda: _id("pred"))
     statement: str
     horizon: str                        # 24h | week | month | year
-    probability: float                  # 0..1
+    probability: float                  # 0..1 (consensus after swarm deliberation)
     reasoning: str = ""
     drivers: list[str] = Field(default_factory=list)   # signals that informed it
     location: str = ""                  # human place name (e.g. "Strait of Hormuz")
     lat: Optional[float] = None         # approx coords so the UI can fly there
     lng: Optional[float] = None
+    agents: list[AgentView] = Field(default_factory=list)   # the swarm's per-persona votes
+    base_probability: Optional[float] = None               # the oracle's pre-swarm estimate
+    split: bool = False                 # True when the swarm disagrees sharply
     brief_id: Optional[str] = None
     ts: int = Field(default_factory=now_ms)
 

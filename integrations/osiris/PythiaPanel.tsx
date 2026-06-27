@@ -9,7 +9,8 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Eye, Sparkles, Radio, Loader2, Globe2 } from 'lucide-react';
 
-type Prediction = { id: string; statement: string; horizon: string; probability: number; reasoning: string; location?: string; lat?: number | null; lng?: number | null };
+type Agent = { name: string; probability: number; note?: string };
+type Prediction = { id: string; statement: string; horizon: string; probability: number; reasoning: string; location?: string; lat?: number | null; lng?: number | null; agents?: Agent[]; base_probability?: number | null; split?: boolean };
 type World = { event_count: number; domains: Record<string, number>; top_events: string[] };
 type Run = { stage: string; trigger: string; error?: string; elapsed_ms?: number };
 type Snap = {
@@ -29,7 +30,15 @@ const HORIZONS = [
 
 const STAGE_LABEL: Record<string, string> = {
   queued: 'queued', sensing: 'reading the globe…', thinking: 'oracle forecasting…',
-  done: 'done', error: 'error',
+  deliberating: 'swarm deliberating…', done: 'done', error: 'error',
+};
+
+// the swarm council — a colour per persona lens
+const AGENT_COLOR: Record<string, string> = {
+  Strategist: 'var(--alert-red)',
+  Economist: 'var(--gold-primary)',
+  Naturalist: 'var(--cyan-primary)',
+  Skeptic: 'var(--text-secondary)',
 };
 
 function timeago(ms?: number | null): string {
@@ -43,6 +52,8 @@ function timeago(ms?: number | null): string {
 export default function PythiaPanel({ mobile = false, onLocate }: { mobile?: boolean; onLocate?: (lat: number, lng: number) => void }) {
   const [snap, setSnap] = useState<Snap>({});
   const [connected, setConnected] = useState(false);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   useEffect(() => {
     let stop = false;
@@ -126,13 +137,40 @@ export default function PythiaPanel({ mobile = false, onLocate }: { mobile?: boo
                   style={{ background: 'rgba(255,255,255,.02)' }}>
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-[10px] text-[var(--text-primary)] leading-snug">{p.statement}</span>
-                    <span className="text-[11px] font-mono font-bold shrink-0" style={{ color: h.color }}>{Math.round(p.probability * 100)}%</span>
+                    <span className="text-[11px] font-mono font-bold shrink-0 flex items-center gap-1" style={{ color: h.color }}>{p.split && <span title="the swarm disagrees sharply" style={{ color: 'var(--alert-red)', fontSize: 8 }}>⚠</span>}{Math.round(p.probability * 100)}%</span>
                   </div>
                   <div className="h-1 rounded-full bg-white/5 mt-1.5 overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${Math.round(p.probability * 100)}%`, background: h.color }} />
                   </div>
                   {p.reasoning && <div className="text-[8px] font-mono text-[var(--text-muted)] mt-1 leading-relaxed">{p.reasoning}</div>}
                   {p.location && <div className="text-[8px] font-mono mt-1 flex items-center gap-1" style={{ color: h.color }}>📍 {p.location}{p.lat != null ? ' · fly →' : ''}</div>}
+                  {p.agents && p.agents.length > 0 && (
+                    <div className="mt-1.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggle(p.id); }}
+                        className="text-[8px] font-mono flex items-center gap-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                      >
+                        <span style={{ color: 'var(--gold-primary)' }}>⬡</span> swarm · {p.agents.length} voices
+                        {p.split && <span style={{ color: 'var(--alert-red)' }}> · split</span>}
+                        <span className="opacity-60">{open.has(p.id) ? '▲' : '▼'}</span>
+                      </button>
+                      {open.has(p.id) && (
+                        <div className="mt-1 pl-1.5 flex flex-col gap-0.5 border-l border-white/10">
+                          {p.agents.map((a) => (
+                            <div key={a.name} className="flex items-center gap-1.5 text-[8px] font-mono">
+                              <span className="w-1 h-1 rounded-full shrink-0" style={{ background: AGENT_COLOR[a.name] || 'var(--text-muted)' }} />
+                              <span className="shrink-0" style={{ color: AGENT_COLOR[a.name] || 'var(--text-secondary)', width: 60 }}>{a.name}</span>
+                              <span className="font-bold shrink-0" style={{ color: AGENT_COLOR[a.name] || 'var(--text-secondary)' }}>{Math.round(a.probability * 100)}%</span>
+                              {a.note && <span className="text-[var(--text-muted)] truncate">{a.note}</span>}
+                            </div>
+                          ))}
+                          {typeof p.base_probability === 'number' && (
+                            <div className="text-[7px] font-mono text-[var(--text-muted)] mt-0.5 opacity-80">oracle {Math.round((p.base_probability || 0) * 100)}% → consensus {Math.round(p.probability * 100)}%</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

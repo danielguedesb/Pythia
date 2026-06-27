@@ -32,6 +32,7 @@ FEEDS = [
     ("/api/polymarket", "polymarket", "market-odds"),
     ("/api/markets", "markets", "markets"),
     ("/api/crypto", "crypto", "markets"),
+    ("/api/frontlines", "frontlines", "conflict"),
 ]
 
 # Words that raise an event's salience (drives auto-scan selection).
@@ -154,6 +155,19 @@ def _markets_events(data: dict, source: str) -> list[WorldEvent]:
     return out
 
 
+def _frontline_events(data: dict) -> list[WorldEvent]:
+    """Summarize the DeepStateMap territory GeoJSON into a single oracle signal."""
+    feats = (data or {}).get("features") or []
+    if not feats:
+        return []
+    occ = sum(1 for f in feats if (f.get("properties") or {}).get("status") == "occupied")
+    con = sum(1 for f in feats if (f.get("properties") or {}).get("status") == "contested")
+    updated = (data or {}).get("updated") or "recently"
+    title = f"Ukraine warfront: {occ} occupied territory areas, {con} contested zones (DeepStateMap, updated {updated})"
+    return [WorldEvent(title=title[:160], summary="Live Russian-occupied + contested territory control map.",
+                       category="conflict", source="frontlines", lat=48.5, lng=31.2, salience=0.9)]
+
+
 class OsirisIntake:
     def __init__(self, base_url: str | None = None):
         self.base = (base_url or CONFIG.osiris_url).rstrip("/")
@@ -175,6 +189,8 @@ class OsirisIntake:
                 data = r.json()
                 if source in ("markets", "crypto"):
                     out.extend(_markets_events(data, source))
+                elif source == "frontlines":
+                    out.extend(_frontline_events(data))
                 else:
                     for d in _find_items(data):
                         ev = _to_event(d, source, category)

@@ -54,6 +54,16 @@ async def run_prediction(trigger: str = "manual") -> RunRecord:
             await stage("thinking", f"{brief.event_count} signals -> oracle")
 
             preds = await oracle.predict(brief, on_stage=stage)
+
+            # swarm deliberation: a council of personas re-weighs each forecast
+            from .config import CONFIG
+            if CONFIG.swarm_enabled and preds:
+                from .swarm import deliberate
+                try:
+                    preds = await deliberate(oracle, brief, preds, on_stage=stage)
+                except Exception as e:  # noqa: BLE001 — never let the swarm sink a run
+                    log.warning("swarm deliberation skipped: %s", e)
+
             STATE.set_predictions(preds)
             run.prediction_ids = [p.id for p in preds]
             await stage("done", f"{len(preds)} predictions")
