@@ -27,6 +27,8 @@ working install). Osiris itself is upstream — clone it separately, then apply 
 | `routes/unrest-route.ts` | `src/app/api/unrest/route.ts` — civil unrest / protests (GDELT events, no key, no deps) |
 | `routes/food-security-route.ts` | `src/app/api/food-security/route.ts` — food insecurity (WFP HungerMap, no key) |
 | `routes/unemployment-route.ts` | `src/app/api/unemployment/route.ts` — unemployment (World Bank, no key) |
+| `routes/gdp-growth-route.ts` | `src/app/api/gdp-growth/route.ts` — GDP growth (World Bank, no key) |
+| `routes/poverty-route.ts` | `src/app/api/poverty/route.ts` — extreme poverty (World Bank, no key) |
 | `lib/countryCentroids.ts` | `src/lib/countryCentroids.ts` — shared ISO3/ISO2/name → centroid for country layers |
 
 ## Edits to existing Osiris files (high level)
@@ -37,11 +39,12 @@ working install). Osiris itself is upstream — clone it separately, then apply 
 - `src/components/OsirisMap.tsx` — `nws-alerts` + `frontlines` polygon sources with
   `nws-fill`/`nws-outline` and `frontline-fill`/`frontline-line` layers; a `displacement`
   source + `displacement-circles` layer (sized by people displaced); social `economy`/
-  `censorship`/`health`/`unrest`/`food`/`unemployment` circle layers; a `spin` prop; pitch 0.
+  `censorship`/`health`/`unrest`/`food`/`unemployment`/`gdp`/`poverty` circle layers;
+  a `spin` prop; pitch 0.
 - `src/components/LayerPanel.tsx` — added "Storm / Flood Zones", "Conflict / War Zones"
-  and "War Front / Territory" toggles; a new SOCIAL group (Displacement / Refugees,
-  Disease Outbreaks, Cost of Living / Inflation, Internet Censorship, Civil Unrest /
-  Protests, Food Insecurity, Unemployment); removed the SDK group and the theme toggle.
+  and "War Front / Territory" toggles; a new SOCIAL group of 9 keyless layers (Displacement,
+  Disease Outbreaks, Inflation, Censorship, Civil Unrest, Food Insecurity, Unemployment,
+  GDP Growth, Extreme Poverty); removed the SDK group and the theme toggle.
 - `src/components/HeadlineTicker.tsx` rendered in `page.tsx`; mobile bottom-nav gains an
   ALERTS tab.
 - `src/app/layout.tsx` + `public/manifest.json` — PYTHIA name/icons (home-screen).
