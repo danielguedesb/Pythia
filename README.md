@@ -8,7 +8,7 @@ PYTHIA fuses two open-source projects — **[MiroFish](https://github.com/666ghj
 
 It runs **entirely on your own hardware**. No cloud, no API keys, no cost.
 
-![PYTHIA](screenshot.png)
+![PYTHIA — the cockpit](screenshots/cockpit.png)
 
 </div>
 
@@ -49,6 +49,43 @@ PYTHIA does. It is an **oracle**: a single surface that takes in the entire live
 - **Picks its own brain** — switch between any model installed in [Ollama](https://ollama.com) from the UI.
 - **Looks how you like** — a soft **light mode** (Apple-style whites & greys, frosted glass) or the deep-dark oracle theme, a dot-matrix display font, and a toggle for every live layer. *Hide a layer from the map and the oracle still watches it* — visibility is cosmetic; the engine ingests every feed regardless.
 - **Opens its eyes to your agents** — a clean machine-readable API exposes the whole world view (see below).
+
+## The swarm — consensus *and* dissent
+
+Every forecast is re-judged by a council of four specialist agents, each reasoning through its own lens. PYTHIA shows you not just the number, but *how the room voted* — and where it splits.
+
+![Swarm deliberation](screenshots/deliberation.png)
+
+| Agent | Lens |
+|---|---|
+| **Strategist** | geopolitics, armed conflict, diplomacy, state actors |
+| **Economist** | markets, energy, commodities, the macro economy |
+| **Naturalist** | disasters, seismic activity, severe weather, climate, public health |
+| **Skeptic** | base rates & the null hypothesis — the calibration brake on hype |
+
+Click any prediction to open its deliberation: a **consensus gauge**, an **agreement spectrum** showing where each agent landed, every agent's vote and its one-to-two-sentence argument, and the shift from the oracle's first guess to the swarm consensus. Sharp disagreement is flagged as a **split**. It all runs locally on your Ollama model — no Zep, no cloud.
+
+## Everything it watches — free & keyless
+
+PYTHIA fuses dozens of live, no-key feeds into a single world-state. Toggle any of them on the globe; the oracle ingests them **all**, regardless of what's visible.
+
+![Threat network](screenshots/threat-network.png)
+
+- **Conflict & security** — armed-conflict events (GDELT), live Ukraine territory control & war fronts (DeepStateMap), civil unrest & protests, cyber-threat / malware networks, GPS jamming, critical & nuclear infrastructure.
+- **Natural hazards** — earthquakes (USGS), NWS storm & flood warning polygons, EONET disasters, wildfires (FIRMS), severe weather, radiation monitors.
+- **Markets** — oil, indices, commodities, crypto, and **Polymarket** crowd odds as forecasting anchors.
+- **Social & humanitarian** — forced displacement & refugees (UNHCR), disease outbreaks (WHO), food insecurity (WFP HungerMap), inflation, unemployment, GDP growth & extreme poverty (World Bank), internet censorship (OONI).
+- **Movement & eyes** — flights (commercial / private / military), satellites, maritime traffic & chokepoints, surveillance balloons, live news streams & CCTV.
+
+No API keys. No accounts. No cost.
+
+## How a forecast is made
+
+1. **Sense** — the engine pulls every live feed concurrently and fuses them into one world brief, refreshed continuously by a lightweight sensing loop.
+2. **Draft** — the local LLM reads the brief and drafts concrete, *located* predictions across four horizons (24h · week · month · year), each with a probability and reasoning.
+3. **Deliberate** — the persona swarm re-scores every forecast; consensus, dissent, and splits are computed.
+4. **Surface** — predictions land on the deck and the globe; click one to fly there and read the full deliberation.
+5. **Serve** — the entire world-view is exposed over the Agent API for your own tools to consume.
 
 ## Agent API
 
