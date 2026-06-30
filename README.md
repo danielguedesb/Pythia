@@ -14,10 +14,6 @@ It runs **entirely on your own hardware**. No cloud, no API keys, no cost.
 
 > **Building an agent?** Point it at PYTHIA and it gains **eyes on the whole planet** — one live, machine-readable view of everything happening on Earth (conflict, disasters, markets, displacement, disease, unrest, cyber) plus forecasts and reasoning, to inform decisions and add real-world context to whatever it does. → **[For agents ↓](#for-agents--give-your-agent-eyes-on-the-planet)**
 
-[![PYTHIA — click to watch the demo](screenshots/cockpit.png)](https://github.com/jangles-byte/Pythia/blob/main/screenshots/demo.mp4)
-
-<sub>▶ click for the 50-second tour — the living globe, the layers, the swarm</sub>
-
 </div>
 
 ---
