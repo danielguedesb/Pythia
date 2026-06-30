@@ -5,3 +5,6 @@ __pycache__/
 runs/*.jsonl
 *.pem
 .DS_Store
+# raw screen recording — the compressed screenshots/demo.mp4 is committed instead
+Screen Recording.mov
+*.mov
