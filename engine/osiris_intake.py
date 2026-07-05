@@ -30,8 +30,15 @@ FEEDS = [
     ("/api/cyber-threats", "cyber", "cyber"),
     ("/api/infrastructure", "infra", "infrastructure"),
     ("/api/polymarket", "polymarket", "market-odds"),
+    ("/api/manifold", "manifold", "market-odds"),
     ("/api/markets", "markets", "markets"),
     ("/api/futures", "futures", "futures"),
+    ("/api/gdacs-alerts", "gdacs", "disaster"),
+    ("/api/hurricanes", "nhc", "hurricane"),
+    ("/api/flood-outlook", "glofas", "flood-outlook"),
+    ("/api/wiki-attention", "wikipedia", "attention"),
+    ("/api/ioda", "ioda", "outage"),
+    ("/api/space-weather", "swpc", "space-weather"),
     ("/api/crypto", "crypto", "markets"),
     ("/api/frontlines", "frontlines", "conflict"),
     ("/api/displacement", "unhcr", "displacement"),
@@ -201,6 +208,111 @@ def _futures_events(data: dict) -> list[WorldEvent]:
     return out
 
 
+def _gdacs_events(data: dict) -> list[WorldEvent]:
+    """GDACS disaster alerts — salience straight from the Red/Orange/Green level."""
+    sal = {"Red": 0.95, "Orange": 0.75, "Green": 0.45}
+
+    def _f(v):
+        return float(v) if isinstance(v, (int, float)) else None
+
+    out = []
+    for e in (data or {}).get("events", []):
+        if not e.get("title"):
+            continue
+        out.append(WorldEvent(
+            title=f"[{e.get('alert', 'Green')}] {e['title']}"[:200],
+            summary=f"{e.get('type', '')} — {e.get('country', '')}".strip(" —"),
+            category="disaster", source="gdacs",
+            lat=_f(e.get("lat")), lng=_f(e.get("lng")), url=e.get("url") or "",
+            salience=sal.get(e.get("alert"), 0.45),
+        ))
+    return out
+
+
+def _hurricane_events(data: dict) -> list[WorldEvent]:
+    """NHC active storms — the forecast cone is the market's weather equivalent."""
+    sal = {"Major Hurricane": 1.0, "Hurricane": 0.95, "Tropical Storm": 0.8}
+    out = []
+    for s in (data or {}).get("storms", []):
+        if not s.get("name"):
+            continue
+        winds = f", {s['winds_mph']} mph winds" if s.get("winds_mph") else ""
+        out.append(WorldEvent(
+            title=f"{s.get('classification', 'Storm')} {s['name']}{winds} (NHC forecast cone live)"[:180],
+            category="hurricane", source="nhc",
+            lat=s.get("lat"), lng=s.get("lng"),
+            salience=sal.get(s.get("classification"), 0.7),
+        ))
+    return out
+
+
+def _flood_outlook_events(data: dict) -> list[WorldEvent]:
+    """GloFAS 30-day discharge outlook — only basins with a real forecast surge."""
+    out = []
+    for b in (data or {}).get("basins", []):
+        risk = b.get("risk") or 0
+        if risk < 2:
+            continue
+        out.append(WorldEvent(
+            title=f"Flood outlook: {b['name']} forecast discharge {risk}x recent median, peaking {b.get('peak_day', 'soon')}"[:180],
+            summary="Copernicus GloFAS 30-day river discharge forecast.",
+            category="flood-outlook", source="glofas",
+            lat=b.get("lat"), lng=b.get("lng"),
+            salience=round(min(1.0, 0.5 + risk / 20), 2),
+        ))
+    return out[:8]
+
+
+def _wiki_events(data: dict) -> list[WorldEvent]:
+    """Wikipedia attention spikes — what humanity suddenly cares about."""
+    out = []
+    for it in (data or {}).get("items", [])[:12]:
+        spike = it.get("spike")
+        tag = "new to the charts" if it.get("new_entry") else (f"{spike}x spike" if spike and spike >= 2 else None)
+        if not tag:
+            continue
+        out.append(WorldEvent(
+            title=f"Wikipedia attention: {it['title']} — {it['views']:,} views ({tag})"[:180],
+            category="attention", source="wikipedia", url=it.get("url") or "",
+            salience=round(min(0.9, 0.45 + (spike or 3) / 20), 2),
+        ))
+    return out
+
+
+def _ioda_events(data: dict) -> list[WorldEvent]:
+    """IODA country-level internet outages — darkness is often the first signal."""
+    out = []
+    for o in (data or {}).get("outages", [])[:10]:
+        out.append(WorldEvent(
+            title=f"Internet outage: {o['country']} — connectivity drop score {o['score']} (24h)"[:160],
+            category="outage", source="ioda",
+            lat=o.get("lat"), lng=o.get("lng"),
+            salience=round(min(1.0, 0.55 + o.get("score", 0) / 40000), 2),
+        ))
+    return out
+
+
+def _space_weather_events(data: dict) -> list[WorldEvent]:
+    """NOAA SWPC — geomagnetic storms + solar flares (satellites, GPS, grids)."""
+    out = []
+    kp = data.get("kp_index")
+    if kp is not None:
+        out.append(WorldEvent(
+            title=f"Space weather: Kp {kp} — {data.get('storm_level', 'Quiet')}",
+            category="space-weather", source="swpc",
+            salience=round(min(1.0, 0.3 + max(0.0, float(kp) - 3) * 0.15), 2),
+        ))
+    for fl in (data.get("solar_flares") or [])[:3]:
+        cls = str(fl.get("class", ""))
+        if cls[:1] in ("M", "X"):    # only flares big enough to matter
+            out.append(WorldEvent(
+                title=f"Solar flare {cls} (peak {fl.get('peak', '?')})"[:120],
+                category="space-weather", source="swpc",
+                salience=0.85 if cls.startswith("X") else 0.6,
+            ))
+    return out
+
+
 def _frontline_events(data: dict) -> list[WorldEvent]:
     """Summarize the DeepStateMap territory GeoJSON into a single oracle signal."""
     feats = (data or {}).get("features") or []
@@ -286,6 +398,18 @@ class OsirisIntake:
                     out.extend(_markets_events(data, source))
                 elif source == "futures":
                     out.extend(_futures_events(data))
+                elif source == "gdacs":
+                    out.extend(_gdacs_events(data))
+                elif source == "nhc":
+                    out.extend(_hurricane_events(data))
+                elif source == "glofas":
+                    out.extend(_flood_outlook_events(data))
+                elif source == "wikipedia":
+                    out.extend(_wiki_events(data))
+                elif source == "ioda":
+                    out.extend(_ioda_events(data))
+                elif source == "swpc":
+                    out.extend(_space_weather_events(data))
                 elif source == "frontlines":
                     out.extend(_frontline_events(data))
                 elif source == "unhcr":
