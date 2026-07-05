@@ -88,6 +88,12 @@ working install). Osiris itself is upstream — clone it separately, then apply 
   fetchers: Yahoo 429s "browser" UAs that arrive without cookies, so the route was silently
   living on its static-estimate fallbacks. A plain server-side fetch passes. (The new
   `futures` route does the same.)
+- `src/components/MarketsPanel.tsx` — added an **ODDS** tab: crowd probabilities of future
+  events from Polymarket (real money) + Manifold, sorted by volume, each a clickable row
+  with a YES% bar and source/volume. Fetches `/api/polymarket` + `/api/manifold` directly
+  (refreshes every 3 min). The full modified component is provided here as
+  `MarketsPanel.tsx` for reference — copy it over the upstream file, or apply the ODDS-tab
+  diff by hand if you carry other local changes to this panel.
 
 All UI talks to the engine only through `/api/engine/*`, which forwards to
 `PYTHIA_ENGINE_URL` (default `http://localhost:8088`).
