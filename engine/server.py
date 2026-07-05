@@ -18,10 +18,11 @@ log = logging.getLogger("pythia.server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from .loop import LOOP, SENSE
+    from .loop import LOOP, RESOLVE, SENSE
     from .pipeline import run_prediction
     LOOP.start()
     SENSE.start()   # keep live events fresh between forecasts
+    RESOLVE.start()  # grade forecasts once their horizon expires
     log.info("PYTHIA oracle up | %s", CONFIG.summary())
 
     async def _boot():
@@ -120,6 +121,7 @@ async def swarm_model_set(payload: dict = Body(...)):
         STATE.swarm_models[persona] = model
     else:
         STATE.swarm_models.pop(persona, None)
+    STATE.save_swarm_models()   # survive engine restarts
     log.info("swarm persona %s -> %s", persona, model or "(main)")
     return {"overrides": STATE.swarm_models}
 
@@ -191,6 +193,27 @@ async def agent_events(domain: str | None = None, source: str | None = None,
         out = out[:limit]
     return {"count": len(out), "events": [e.model_dump() for e in out],
             "domains_available": sorted({e.category for e in STATE.events})}
+
+
+@app.get("/scorecard")
+async def scorecard():
+    """PYTHIA's track record. Every forecast is persisted when made; an LLM judge
+    grades it against the archived world once its horizon expires. Returns overall
+    Brier score, hit rate, per-horizon + per-persona accuracy, calibration bins,
+    and the most recent resolutions."""
+    from .runtime import ledger
+    return ledger.scorecard()
+
+
+@app.post("/scorecard/resolve")
+async def scorecard_resolve():
+    """Run a resolution pass now (grade any due forecasts) instead of waiting
+    for the hourly loop."""
+    from .loop import resolve_due
+    if STATE.generating:
+        return {"status": "busy — oracle pass in progress"}
+    judged = await resolve_due()
+    return {"status": "ok", "judged": judged}
 
 
 @app.get("/world")

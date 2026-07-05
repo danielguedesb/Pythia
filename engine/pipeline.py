@@ -17,11 +17,13 @@ _lock = asyncio.Lock()
 async def refresh_world() -> int:
     """Cheap sensing pass — refresh live events + brief WITHOUT calling the LLM.
     Keeps the agent view and oracle context current between forecasts."""
-    from .runtime import intake
+    from .runtime import intake, ledger
     try:
         events = await intake.fetch(limit=250)
         STATE.events = events
-        STATE.set_world(build_brief(events))
+        brief = build_brief(events)
+        STATE.set_world(brief)
+        ledger.maybe_record_brief(brief)   # ~hourly world archive for the judge
         return len(events)
     except Exception as e:  # noqa: BLE001
         log.warning("sense refresh failed: %s", e)
@@ -66,6 +68,13 @@ async def run_prediction(trigger: str = "manual") -> RunRecord:
 
             STATE.set_predictions(preds)
             run.prediction_ids = [p.id for p in preds]
+
+            # ledger: every forecast goes on the record the moment it's made
+            from .runtime import ledger
+            if CONFIG.track_enabled:
+                ledger.record_forecasts(preds, brief)
+                ledger.maybe_record_brief(brief)
+
             await stage("done", f"{len(preds)} predictions")
         except Exception as e:  # noqa: BLE001
             run.error = str(e)

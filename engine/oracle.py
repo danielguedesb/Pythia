@@ -74,6 +74,9 @@ class Oracle:
             f"=== LIVE WORLD SNAPSHOT ({brief.event_count} signals) ===\n{brief.text}\n\n"
             f"Note: any [MARKET-ODDS] signals are real-money crowd probabilities from Polymarket — "
             f"treat them as strong anchors; you may sharpen or disagree with them, but stay calibrated.\n"
+            f"Any [FUTURES] signals are forward-looking prices: a curve in backwardation means the market "
+            f"is paying a premium for delivery now (physical tightness / supply stress); a VIX jump means "
+            f"equity markets are pricing near-term turmoil. Read them as the market's own forecast.\n"
             f"Give {CONFIG.predictions_per_horizon} concrete predictions for EACH horizon ({spans}).\n"
             f"Return ONLY a JSON array. Each element exactly:\n"
             f'{{"statement": "<specific predicted event>", "horizon": <one of {horizons}>, '
@@ -122,6 +125,39 @@ class Oracle:
             messages.append({"role": role, "content": str(h.get("content", ""))[:2000]})
         messages.append({"role": "user", "content": f"{context}\n\n— USER QUESTION —\n{question}"})
         return await self._complete(messages, 800)
+
+    async def judge(self, forecast: dict, evidence: list[str], current_brief: str) -> tuple[str, str]:
+        """Grade one expired forecast against what actually happened.
+        Returns (verdict yes|no|unclear, one-sentence evidence)."""
+        import time as _t
+        made = _t.strftime("%Y-%m-%d", _t.gmtime(forecast["ts"] / 1000))
+        due = _t.strftime("%Y-%m-%d", _t.gmtime(forecast["resolve_after"] / 1000))
+        lines = "\n".join(f"- {t}" for t in evidence) or "(no archived signals for this window)"
+        prompt = (
+            f'FORECAST (made {made}, horizon "{forecast["horizon"]}", window closed {due}):\n'
+            f'"{forecast["statement"]}"'
+            + (f' — location: {forecast["location"]}' if forecast.get("location") else "") + "\n\n"
+            f"WORLD SIGNALS ARCHIVED DURING THE WINDOW:\n{lines}\n\n"
+            f"CURRENT WORLD SNAPSHOT (aftermath evidence):\n{current_brief[:2500]}\n\n"
+            "Did the forecast come true within its window? Judge strictly from the evidence above.\n"
+            'Return ONLY JSON: {"verdict": "yes" | "no" | "unclear", '
+            '"evidence": "<one sentence citing the deciding signal>"}\n'
+            '"yes" only if the evidence clearly shows it happened; "no" if the window closed and the '
+            "evidence shows it did not (or an event that big would surely appear above and does not); "
+            '"unclear" only if the evidence genuinely cannot decide.'
+        )
+        sys = "You are a strict, impartial resolution judge for a forecasting system. Output strictly JSON."
+        text = await self._complete([{"role": "system", "content": sys},
+                                     {"role": "user", "content": prompt}], 220)
+        for chunk in self._extract_objects(text):
+            try:
+                d = json.loads(chunk)
+            except (ValueError, TypeError):
+                continue
+            v = str(d.get("verdict", "")).lower().strip()
+            if v in ("yes", "no", "unclear"):
+                return v, str(d.get("evidence", ""))[:400]
+        return "unclear", ""
 
     @staticmethod
     def _extract_objects(text: str) -> list[str]:
