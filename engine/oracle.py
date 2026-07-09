@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 import httpx
@@ -70,7 +71,10 @@ class Oracle:
     def _prompt(self, brief: WorldBrief) -> str:
         horizons = ", ".join(f'"{h}"' for h in CONFIG.horizons)
         spans = "; ".join(f"{h} = {_HORIZON_LABEL.get(h, h)}" for h in CONFIG.horizons)
+        today = datetime.now(timezone.utc).strftime("%A, %Y-%m-%d")
         return (
+            f"=== TODAY IS {today} (UTC) — every prediction is about the future "
+            f"RELATIVE TO THIS DATE; never reference earlier years as upcoming ===\n"
             f"=== LIVE WORLD SNAPSHOT ({brief.event_count} signals) ===\n{brief.text}\n\n"
             f"Note: any [MARKET-ODDS] signals are real-money crowd probabilities from Polymarket — "
             f"treat them as strong anchors; you may sharpen or disagree with them, but stay calibrated.\n"

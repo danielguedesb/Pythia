@@ -58,7 +58,11 @@ def _persona_messages(name: str, lens: str, brief_text: str, preds: list[Predict
         f'Return ONLY a JSON array, one object per prediction: '
         f'{{"i": <index>, "p": <0-100>, "note": "<your 1-2 sentence argument>"}}. No prose, no markdown.'
     )
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%A, %Y-%m-%d")
     user = (
+        f"=== TODAY IS {today} (UTC) — judge each prediction as a claim about "
+        f"the future relative to this date ===\n"
         f"=== LIVE WORLD SNAPSHOT ===\n{brief_text[:2600]}\n\n"
         f"=== CANDIDATE PREDICTIONS ===\n{listing}\n\n"
         f"Score every prediction from your lens. JSON array only."
