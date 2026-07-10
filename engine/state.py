@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections import OrderedDict
 from typing import Any, Optional
 
@@ -21,7 +22,7 @@ class EngineState:
         self.swarm_models.update(self._load_swarm_models())
         self.runs: "OrderedDict[str, RunRecord]" = OrderedDict()
         self.generating: bool = False
-        self.loop_enabled: bool = False
+        self.loop_enabled: bool = os.getenv("LOOP_AUTOSTART", "1").strip().lower() not in ("0", "false", "no", "off")
         self.last_run_ms: Optional[int] = None
         self.started_ms: int = now_ms()
         self._subs: set[asyncio.Queue] = set()

@@ -12,7 +12,8 @@ import re
 
 import httpx
 
-from .config import CONFIG, HTTPX_VERIFY
+from .config import CONFIG
+from .httpclient import CLIENT
 from .models import WorldEvent
 
 log = logging.getLogger("pythia.intake")
@@ -380,9 +381,8 @@ class OsirisIntake:
 
     async def health(self) -> bool:
         try:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, timeout=5) as c:
-                r = await c.get(f"{self.base}/api/health")
-                return r.status_code < 500
+            r = await CLIENT.get(f"{self.base}/api/health", timeout=5)
+            return r.status_code < 500
         except Exception:  # noqa: BLE001 — health is a status dot; never raise
             return False
 
@@ -441,8 +441,7 @@ class OsirisIntake:
 
     async def fetch(self, limit: int = 40) -> list[WorldEvent]:
         # Fetch feeds concurrently so one slow/dead feed (e.g. GDELT) can't starve the rest.
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, timeout=25) as c:
-            batches = await asyncio.gather(*[self._fetch_feed(c, p, s, cat) for p, s, cat in FEEDS])
+        batches = await asyncio.gather(*[self._fetch_feed(CLIENT, p, s, cat) for p, s, cat in FEEDS])
         events: list[WorldEvent] = [ev for batch in batches for ev in batch]
         # dedupe by lowercased title, keep highest salience, sort
         seen: dict[str, WorldEvent] = {}

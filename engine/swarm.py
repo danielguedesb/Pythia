@@ -72,11 +72,17 @@ def _persona_messages(name: str, lens: str, brief_text: str, preds: list[Predict
 
 def _parse_scored(oracle, text: str, n_preds: int) -> dict[int, tuple[float, str]]:
     scored: dict[int, tuple[float, str]] = {}
+    votes: list[object] = []
     for chunk in oracle._extract_objects(text):
         try:
             o = json.loads(chunk)
         except (ValueError, TypeError):
             continue
+        if isinstance(o, dict) and "i" not in o:
+            votes.extend(item for value in o.values() if isinstance(value, list) for item in value)
+        else:
+            votes.append(o)
+    for o in votes:
         if not isinstance(o, dict) or "i" not in o:
             continue
         try:

@@ -10,9 +10,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
-import httpx
-
-from .config import CONFIG, HTTPX_VERIFY
+from .config import CONFIG
+from .httpclient import CLIENT
 from .models import Prediction, WorldBrief
 
 log = logging.getLogger("pythia.oracle")
@@ -49,22 +48,21 @@ class Oracle:
 
     async def health(self) -> bool:
         try:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, timeout=5) as c:
-                r = await c.get(f"{self.base}/models", headers={"Authorization": f"Bearer {self.key}"})
-                return r.status_code < 500
+            r = await CLIENT.get(f"{self.base}/models",
+                                 headers={"Authorization": f"Bearer {self.key}"}, timeout=5)
+            return r.status_code < 500
         except Exception:  # noqa: BLE001 — health is a status dot; never raise
             return False
 
     async def list_models(self) -> list[str]:
         """Scan the LLM backend (Ollama) for installed models."""
         try:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, timeout=8) as c:
-                r = await c.get(f"{self.base}/models", headers={"Authorization": f"Bearer {self.key}"})
-                r.raise_for_status()
-                data = r.json().get("data", [])
-                names = sorted({m.get("id", "") for m in data if m.get("id")})
-                # drop embedding-only models — they can't do chat completions
-                return [n for n in names if n and "embed" not in n.lower()]
+            r = await CLIENT.get(f"{self.base}/models",
+                                 headers={"Authorization": f"Bearer {self.key}"}, timeout=8)
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            names = sorted({m.get("id", "") for m in data if m.get("id")})
+            return [n for n in names if n and "embed" not in n.lower()]
         except Exception:  # noqa: BLE001
             return []
 
@@ -99,15 +97,15 @@ class Oracle:
         return preds
 
     async def _chat(self, user: str) -> str:
-        return await self._complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}], 1400)
+        return await self._complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}], 4096)
 
     async def _complete(self, messages: list[dict], max_tokens: int = 900, model: str | None = None) -> str:
         body = {"model": model or self.model, "messages": messages, "temperature": CONFIG.temperature, "max_tokens": max_tokens}
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, timeout=CONFIG.request_timeout) as c:
-            r = await c.post(f"{self.base}/chat/completions", json=body,
-                             headers={"Authorization": f"Bearer {self.key}"})
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+        r = await CLIENT.post(f"{self.base}/chat/completions", json=body,
+                              headers={"Authorization": f"Bearer {self.key}"},
+                              timeout=CONFIG.request_timeout)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
 
     async def chat(self, question: str, brief, predictions, history=None) -> str:
         """Answer a free-form question grounded in EVERY live source + current predictions."""
@@ -169,6 +167,15 @@ class Oracle:
 
         Robust to ```fences```, multiple JSON arrays, trailing prose, etc.
         """
+        objs = Oracle._scan_balanced(text)
+        if not objs:
+            bracket = text.find("[")
+            if bracket != -1:
+                objs = Oracle._scan_balanced(text[bracket + 1:])
+        return objs
+
+    @staticmethod
+    def _scan_balanced(text: str) -> list[str]:
         objs: list[str] = []
         depth, start, in_str, esc = 0, None, False, False
         for i, ch in enumerate(text):
@@ -233,9 +240,17 @@ class Oracle:
                 it = json.loads(chunk)
             except (ValueError, TypeError):
                 continue
-            pred = cls._clean_pred(it, brief_id)
-            if pred:
-                preds.append(pred)
+            entries = (
+                it["predictions"]
+                if isinstance(it, dict) and isinstance(it.get("predictions"), list)
+                else [it]
+            )
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                pred = cls._clean_pred(entry, brief_id)
+                if pred:
+                    preds.append(pred)
         if not preds:
             log.warning("oracle: no predictions parsed from: %s", text[:200])
         return preds
