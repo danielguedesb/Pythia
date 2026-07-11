@@ -76,9 +76,14 @@ class Ledger:
                 "horizon": p.horizon, "probability": p.probability,
                 "base_probability": p.base_probability, "location": p.location,
                 "reasoning": p.reasoning, "lat": p.lat, "lng": p.lng,
+                "contract_version": p.contract_version,
+                "drivers": p.drivers,
+                "driver_event_ids": p.driver_event_ids,
+                "trajectory": p.trajectory,
                 "split": p.split, "ts": p.ts,
                 "resolve_after": p.ts + HORIZON_MS.get(p.horizon, HORIZON_MS["week"]),
-                "agents": [{"name": a.name, "probability": a.probability, "model": a.model}
+                "agents": [{"name": a.name, "probability": a.probability,
+                            "note": a.note, "model": a.model}
                            for a in p.agents],
                 "brief_id": brief.id if brief else None,
             }

@@ -27,7 +27,11 @@ def hydrate_from_ledger() -> int:
         preds.append(Prediction(
             id=f["id"], statement=f["statement"], horizon=f["horizon"],
             probability=f["probability"], base_probability=f.get("base_probability"),
+            contract_version=int(f.get("contract_version") or 1),
             reasoning=f.get("reasoning") or "", location=f.get("location") or "",
+            drivers=list(f.get("drivers") or []),
+            driver_event_ids=list(f.get("driver_event_ids") or []),
+            trajectory=f.get("trajectory") or "other",
             lat=f.get("lat"), lng=f.get("lng"), split=bool(f.get("split")),
             agents=[AgentView(**a) for a in f.get("agents", [])],
             ts=f["ts"], brief_id=f.get("brief_id"),

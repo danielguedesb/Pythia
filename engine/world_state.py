@@ -22,13 +22,19 @@ def build_brief(events: list[WorldEvent]) -> WorldBrief:
         for e in evs:
             loc = f"  @{e.lat:.1f},{e.lng:.1f}" if e.lat is not None else ""
             extra = f" — {e.summary[:140]}" if e.summary else ""
-            lines.append(f"  • {e.title}{extra}{loc}")
+            lines.append(f"  • [{e.id}] {e.title}{extra}{loc}")
             top.append(e.title)
 
     text = "\n".join(lines).strip()
+    text = text[:6500]
+    visible_event_ids = [e.id for e in events if f"[{e.id}]" in text]
     return WorldBrief(
         event_count=len(events),
         domains=domains,
-        text=text[:6500],
+        text=text,
         top_events=top[:24],
+        visible_event_ids=visible_event_ids,
+        visible_event_titles={
+            e.id: e.title for e in events if e.id in visible_event_ids
+        },
     )

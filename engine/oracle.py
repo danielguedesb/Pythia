@@ -37,7 +37,7 @@ def _norm_horizon(h: str) -> str:
         return "month"
     if "year" in h:
         return "year"
-    return "week"
+    return ""
 
 
 class Oracle:
@@ -80,9 +80,14 @@ class Oracle:
             f"is paying a premium for delivery now (physical tightness / supply stress); a VIX jump means "
             f"equity markets are pricing near-term turmoil. Read them as the market's own forecast.\n"
             f"Give {CONFIG.predictions_per_horizon} concrete predictions for EACH horizon ({spans}).\n"
+            f"Each prediction MUST cite 1 to 3 event ids copied exactly from the bracketed ids "
+            f"in the snapshot. trajectory describes whether the predicted event is an escalation, "
+            f"continuation, or resolution of those cited signals; use other only when none applies.\n"
             f"Return ONLY a JSON array. Each element exactly:\n"
             f'{{"statement": "<specific predicted event>", "horizon": <one of {horizons}>, '
             f'"probability": <integer 0-100>, "reasoning": "<one sentence grounded in the snapshot>", '
+            f'"driver_event_ids": ["<1-3 exact bracketed event ids>"], '
+            f'"trajectory": "escalation"|"continuation"|"resolution"|"other", '
             f'"location": "<the place this is about, e.g. Strait of Hormuz>", '
             f'"lat": <approx latitude or null>, "lng": <approx longitude or null>}}\n'
             f"JSON array only — no markdown, no commentary."
@@ -92,7 +97,12 @@ class Oracle:
         if on_stage:
             await on_stage("thinking", f"asking {self.model}")
         text = await self._chat(self._prompt(brief))
-        preds = self._parse(text, brief.id)
+        driver_titles = {
+            event_id: brief.visible_event_titles[event_id]
+            for event_id in brief.visible_event_ids
+            if event_id in brief.visible_event_titles
+        }
+        preds = self._parse(text, brief.id, driver_titles=driver_titles)
         log.info("oracle produced %d predictions", len(preds))
         return preds
 
@@ -201,7 +211,12 @@ class Oracle:
         return objs
 
     @staticmethod
-    def _clean_pred(it: dict, brief_id: str) -> Prediction | None:
+    def _clean_pred(
+        it: dict,
+        brief_id: str,
+        *,
+        driver_titles: dict[str, str] | None = None,
+    ) -> Prediction | None:
         """Normalize one raw prediction dict from model output (or None if unusable)."""
         if not isinstance(it, dict) or not it.get("statement"):
             return None
@@ -222,19 +237,50 @@ class Oracle:
             lat = None
         if lng is not None and not (-180 <= lng <= 180):
             lng = None
+        raw_driver_ids = it.get("driver_event_ids")
+        driver_event_ids: list[str] = []
+        if isinstance(raw_driver_ids, list):
+            for raw_id in raw_driver_ids:
+                event_id = str(raw_id).strip()
+                if not event_id or event_id in driver_event_ids:
+                    continue
+                if driver_titles is not None and event_id not in driver_titles:
+                    continue
+                driver_event_ids.append(event_id)
+                if len(driver_event_ids) >= 3:
+                    break
+        if driver_titles is not None and not driver_event_ids:
+            return None
+        trajectory = str(it.get("trajectory") or "other").strip().lower()
+        if trajectory not in {"escalation", "continuation", "resolution", "other"}:
+            trajectory = "other"
         return Prediction(
             statement=str(it["statement"]).strip()[:300],
             horizon=_norm_horizon(str(it.get("horizon", "week"))),
             probability=round(p, 2),
+            contract_version=2 if driver_titles is not None else 1,
             reasoning=str(it.get("reasoning", "")).strip()[:400],
+            drivers=[driver_titles[event_id] for event_id in driver_event_ids]
+            if driver_titles is not None
+            else [],
+            driver_event_ids=driver_event_ids,
+            trajectory=trajectory,
             location=str(it.get("location", "")).strip()[:80],
             lat=lat, lng=lng,
             brief_id=brief_id,
         )
 
     @classmethod
-    def _parse(cls, text: str, brief_id: str) -> list[Prediction]:
+    def _parse(
+        cls,
+        text: str,
+        brief_id: str,
+        *,
+        driver_titles: dict[str, str] | None = None,
+    ) -> list[Prediction]:
         preds: list[Prediction] = []
+        per_horizon: dict[str, int] = {}
+        seen: set[tuple[str, str]] = set()
         for chunk in cls._extract_objects(text):
             try:
                 it = json.loads(chunk)
@@ -248,9 +294,23 @@ class Oracle:
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
-                pred = cls._clean_pred(entry, brief_id)
-                if pred:
-                    preds.append(pred)
+                pred = cls._clean_pred(
+                    entry,
+                    brief_id,
+                    driver_titles=driver_titles,
+                )
+                if pred is None or pred.horizon not in CONFIG.horizons:
+                    continue
+                identity = (pred.horizon, pred.statement.casefold())
+                if identity in seen:
+                    continue
+                if per_horizon.get(pred.horizon, 0) >= max(
+                    0, CONFIG.predictions_per_horizon
+                ):
+                    continue
+                seen.add(identity)
+                per_horizon[pred.horizon] = per_horizon.get(pred.horizon, 0) + 1
+                preds.append(pred)
         if not preds:
             log.warning("oracle: no predictions parsed from: %s", text[:200])
         return preds

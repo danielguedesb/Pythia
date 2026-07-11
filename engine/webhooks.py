@@ -5,9 +5,9 @@ thresholds: high-probability forecasts after each oracle pass, and fresh
 high-salience world events as the sensing loop spots them. Hooks persist in
 runs/webhooks.json. Fire-and-forget: a dead endpoint never slows the oracle.
 
-Payloads:
-  {"kind": "forecasts", "ts": <ms>, "forecasts": [{statement, horizon, probability, location, lat, lng, reasoning}]}
-  {"kind": "events",    "ts": <ms>, "events":    [{title, category, source, salience, lat, lng}]}
+Payloads include the same v2 forecast-to-event lineage exposed by the polling
+API: forecasts carry contract_version, driver_event_ids, drivers, and trajectory;
+events carry their deterministic id.
 """
 from __future__ import annotations
 
@@ -75,8 +75,11 @@ async def _post(url: str, body: dict) -> None:
 def fire_forecasts(preds: list) -> None:
     """After an oracle pass: push forecasts above each hook's probability bar."""
     for hook in HOOKS:
-        sel = [{"statement": p.statement, "horizon": p.horizon, "probability": p.probability,
-                "location": p.location, "lat": p.lat, "lng": p.lng, "reasoning": p.reasoning}
+        sel = [{"statement": p.statement, "horizon": p.horizon,
+                "probability": p.probability, "contract_version": p.contract_version,
+                "driver_event_ids": p.driver_event_ids, "drivers": p.drivers,
+                "trajectory": p.trajectory, "location": p.location,
+                "lat": p.lat, "lng": p.lng, "reasoning": p.reasoning}
                for p in preds if p.probability >= hook["min_probability"]]
         if sel:
             asyncio.create_task(_post(hook["url"], {"kind": "forecasts", "ts": now_ms(), "forecasts": sel}))
@@ -92,7 +95,7 @@ def fire_events(events: list) -> None:
     if not fresh:
         return
     for hook in HOOKS:
-        sel = [{"title": e.title, "category": e.category, "source": e.source,
+        sel = [{"id": e.id, "title": e.title, "category": e.category, "source": e.source,
                 "salience": e.salience, "lat": e.lat, "lng": e.lng}
                for e in fresh if e.salience >= hook["min_salience"]]
         if sel:

@@ -94,8 +94,8 @@ No API keys. No accounts. No cost.
 ## How a forecast is made
 
 1. **Sense** — the engine pulls every live feed concurrently and fuses them into one world brief, refreshed continuously by a lightweight sensing loop.
-2. **Draft** — the local LLM reads the brief and drafts concrete, *located* predictions across four horizons (24h · week · month · year), each with a probability and reasoning.
-3. **Deliberate** — the persona swarm re-scores every forecast; consensus, dissent, and splits are computed.
+2. **Draft** — the local LLM reads the brief and drafts concrete, *located* predictions across four horizons (24h · week · month · year), each with a probability, reasoning, trajectory, and exact ids for the observed events that drove it. Unknown event ids are discarded and output is capped per horizon before deliberation.
+3. **Deliberate** — the persona swarm re-scores every retained forecast; incomplete replies are retried, all forecasts are covered in bounded batches, and consensus, dissent, and splits are computed.
 4. **Surface** — predictions land on the deck and the globe; click one to fly there and read the full deliberation.
 5. **Serve** — the entire world-view is exposed over the Agent API (and an MCP server) for your own tools to consume.
 6. **Keep score** — every forecast is persisted; once its horizon expires an LLM judge grades it against the archived world, and the Brier scorecard updates — overall, per horizon, and per swarm persona.
@@ -140,7 +140,7 @@ One JSON payload = your agent's situational awareness: a prose **summary** of th
 | `GET /links` | — | liveness — `engine`/`osiris`/`oracle` booleans, current `model`, `generating`, `loop`, `prediction_count` |
 | `GET /agent/view` | — | **the whole world in one payload** — `summary`, `domains`, `events_by_domain` (lat/lng), `event_count`, `predictions`, `live_stream` |
 | `GET /agent/events` | `domain`, `source`, `min_salience`, `since` (ms), `limit` | live events, most-salient first, + `domains_available` for discovery |
-| `GET /predictions` | `horizon` (`24h`\|`week`\|`month`\|`year`), `min_probability` | forecasts (each with its swarm `agents`, `split`, `base_probability`) + the world brief + valid `horizons` |
+| `GET /predictions` | `horizon` (`24h`\|`week`\|`month`\|`year`), `min_probability` | forecasts (each with v2 event lineage, swarm `agents`, `split`, `base_probability`) + the world brief + valid `horizons` |
 | `GET /world` | — | the assembled world brief — prose `text`, `domains`, `event_count` |
 | `GET /runs` | — | the last 20 oracle passes (stage, trigger, timing) |
 | `GET /state` | — | full state snapshot — predictions + world + runs + flags |
@@ -159,8 +159,8 @@ One JSON payload = your agent's situational awareness: a prose **summary** of th
 | `GET /docs` · `GET /openapi.json` | — | interactive Swagger UI + the full **OpenAPI spec** (self-discovery) |
 
 ### Object shapes
-- **Event** — `{ title, summary, category, source, lat, lng, salience (0–1), ts (epoch ms), url }`
-- **Prediction** — `{ statement, horizon, probability (0–1), reasoning, location, lat, lng, base_probability, split, agents: [{ name, probability, note }] }`
+- **Event** — `{ id (deterministic daily identity), title, summary, category, source, lat, lng, salience (0–1), ts (epoch ms), url }`
+- **Prediction** — `{ contract_version: 2, statement, horizon, probability (0–1), reasoning, driver_event_ids, drivers, trajectory, location, lat, lng, base_probability, split, agents: [{ name, probability, note, model }] }`. `drivers` are dereferenced by code from the cited event ids; model-invented ids do not survive parsing. Legacy ledger rows remain readable as contract v1.
 
 ### MCP server — plug PYTHIA straight into your agent
 

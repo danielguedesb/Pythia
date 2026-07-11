@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,8 @@ class WorldBrief(BaseModel):
     domains: dict[str, int] = Field(default_factory=dict)   # category -> count
     text: str = ""                                          # the prose brief fed to the LLM
     top_events: list[str] = Field(default_factory=list)
+    visible_event_ids: list[str] = Field(default_factory=list)
+    visible_event_titles: dict[str, str] = Field(default_factory=dict)
 
 
 class AgentView(BaseModel):
@@ -55,8 +57,11 @@ class Prediction(BaseModel):
     statement: str
     horizon: str                        # 24h | week | month | year
     probability: float                  # 0..1 (consensus after swarm deliberation)
+    contract_version: int = 1           # v2 adds verifiable event lineage
     reasoning: str = ""
     drivers: list[str] = Field(default_factory=list)   # signals that informed it
+    driver_event_ids: list[str] = Field(default_factory=list)
+    trajectory: Literal["escalation", "continuation", "resolution", "other"] = "other"
     location: str = ""                  # human place name (e.g. "Strait of Hormuz")
     lat: Optional[float] = None         # approx coords so the UI can fly there
     lng: Optional[float] = None

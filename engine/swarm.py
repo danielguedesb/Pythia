@@ -102,22 +102,31 @@ async def _ask(oracle, name: str, lens: str, brief_text: str,
     """Run one persona; return (name, model used, {prediction_index: (probability, note)})."""
     persona_model = STATE.swarm_models.get(name) or None    # per-persona override (else main model)
     used_model = persona_model or oracle.model
-    # Small models can run out of context on the full brief and emit a truncated
-    # (unparseable) reply — so if a pass yields zero votes, retry once compacted.
+    # Small models sometimes return only a prefix of the requested votes. Retry
+    # exactly the missing subset once with a compact brief instead of accepting
+    # a silently partial council.
+    scored: dict[int, tuple[float, str]] = {}
+    remaining = list(range(len(preds)))
     for brief_cap in (2600, 1100):
+        subset = [preds[index] for index in remaining]
         try:
-            text = await oracle._complete(_persona_messages(name, lens, brief_text[:brief_cap], preds),
+            text = await oracle._complete(_persona_messages(name, lens, brief_text[:brief_cap], subset),
                                           max_tokens=1300, model=persona_model)
         except Exception as e:  # noqa: BLE001
             log.warning("swarm persona %s (%s) failed: %s", name, used_model, e)
-            return name, used_model, {}
-        scored = _parse_scored(oracle, text, len(preds))
-        if scored:
             return name, used_model, scored
-        log.warning("swarm persona %s (%s): no votes parsed from %d chars (%r) — %s",
-                    name, used_model, len(text), text[:80],
-                    "retrying with a compacted brief" if brief_cap == 2600 else "giving up this pass")
-    return name, used_model, {}
+        parsed = _parse_scored(oracle, text, len(subset))
+        for local_index, vote in parsed.items():
+            scored[remaining[local_index]] = vote
+        remaining = [index for index in remaining if index not in scored]
+        if not remaining:
+            return name, used_model, scored
+        log.warning(
+            "swarm persona %s (%s): %d/%d votes missing after %d chars — %s",
+            name, used_model, len(remaining), len(preds), len(text),
+            "retrying missing subset" if brief_cap == 2600 else "giving up this pass",
+        )
+    return name, used_model, scored
 
 
 async def deliberate(oracle, brief: WorldBrief | None, predictions: list[Prediction],
@@ -126,30 +135,51 @@ async def deliberate(oracle, brief: WorldBrief | None, predictions: list[Predict
     a consensus probability, and a `split` flag when they disagree sharply."""
     if not predictions:
         return predictions
-    subset = predictions[:_MAX_PREDS]
     if on_stage:
-        await on_stage("deliberating", f"swarm of {len(PERSONAS)} weighing {len(subset)} forecasts")
+        await on_stage(
+            "deliberating",
+            f"swarm of {len(PERSONAS)} weighing {len(predictions)} forecasts",
+        )
     brief_text = brief.text if brief else ""
-    results = await asyncio.gather(*[_ask(oracle, n, l, brief_text, subset) for n, l in PERSONAS])
-
     weights = _persona_weights()
     if weights:
         log.info("swarm weights (Brier-earned): %s",
                  {k: round(v, 2) for k, v in weights.items()})
 
     enriched = 0
-    for idx, pred in enumerate(subset):
-        views = [AgentView(name=name, probability=scored[idx][0], note=scored[idx][1], model=used)
-                 for name, used, scored in results if idx in scored]
-        if not views:
-            continue
-        pred.agents = views
-        ps = [v.probability for v in views]
-        if len(ps) >= 2:   # only let the council override the oracle when there's a real quorum
-            pred.base_probability = pred.probability
-            ws = [weights.get(v.name, 1.0) for v in views]
-            pred.probability = round(sum(w * p for w, p in zip(ws, ps)) / sum(ws), 2)
-            pred.split = (max(ps) - min(ps)) >= _SPLIT_SPREAD
-        enriched += 1
-    log.info("swarm deliberated %d/%d forecasts across %d personas", enriched, len(subset), len(PERSONAS))
+    for start in range(0, len(predictions), _MAX_PREDS):
+        subset = predictions[start:start + _MAX_PREDS]
+        results = await asyncio.gather(
+            *[
+                _ask(oracle, name, lens, brief_text, subset)
+                for name, lens in PERSONAS
+            ]
+        )
+        for idx, pred in enumerate(subset):
+            views = [
+                AgentView(
+                    name=name,
+                    probability=scored[idx][0],
+                    note=scored[idx][1],
+                    model=used,
+                )
+                for name, used, scored in results
+                if idx in scored
+            ]
+            if not views:
+                continue
+            pred.agents = views
+            ps = [v.probability for v in views]
+            if len(ps) >= 2:
+                pred.base_probability = pred.probability
+                ws = [weights.get(v.name, 1.0) for v in views]
+                pred.probability = round(
+                    sum(w * p for w, p in zip(ws, ps)) / sum(ws), 2
+                )
+                pred.split = (max(ps) - min(ps)) >= _SPLIT_SPREAD
+            enriched += 1
+    log.info(
+        "swarm deliberated %d/%d forecasts across %d personas",
+        enriched, len(predictions), len(PERSONAS),
+    )
     return predictions

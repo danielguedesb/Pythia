@@ -7,8 +7,10 @@ hand to MiroFish.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -63,6 +65,22 @@ _HOT = {
     "flood": 0.8, "volcano": 0.9, "eruption": 0.9, "tsunami": 1.0, "wildfire": 0.8,
     "breach": 0.75, "ransomware": 0.8, "famine": 0.85, "drought": 0.7, "evacuat": 0.85,
 }
+
+
+def _stable_event_id(event: WorldEvent) -> str:
+    """Stable within a UTC day, deterministic across sensing refreshes."""
+    upstream = ""
+    for key in ("id", "event_id", "guid", "slug"):
+        value = event.raw.get(key)
+        if isinstance(value, (str, int, float)) and str(value).strip():
+            upstream = str(value).strip().lower()
+            break
+    anchor = upstream or event.url.strip().lower() or re.sub(
+        r"\s+", " ", event.title.strip().lower()
+    )
+    day = datetime.fromtimestamp(event.ts / 1000.0, tz=timezone.utc).date().isoformat()
+    material = f"{event.source.lower()}|{event.category.lower()}|{anchor}|{day}"
+    return f"evt_{hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _find_items(data) -> list[dict]:
@@ -450,4 +468,7 @@ class OsirisIntake:
             if key not in seen or ev.salience > seen[key].salience:
                 seen[key] = ev
         ranked = sorted(seen.values(), key=lambda e: e.salience, reverse=True)
-        return ranked[:limit]
+        selected = ranked[:limit]
+        for event in selected:
+            event.id = _stable_event_id(event)
+        return selected

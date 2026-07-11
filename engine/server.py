@@ -157,7 +157,7 @@ async def agent_view():
     by_domain: dict[str, list] = {}
     for e in STATE.events:
         by_domain.setdefault(e.category, []).append({
-            "title": e.title, "summary": e.summary, "source": e.source,
+            "id": e.id, "title": e.title, "summary": e.summary, "source": e.source,
             "lat": e.lat, "lng": e.lng, "salience": e.salience, "ts": e.ts,
         })
     return {
