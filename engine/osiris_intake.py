@@ -133,6 +133,28 @@ def _salience(title: str, summary: str, raw: dict) -> float:
     return round(min(1.0, score), 2)
 
 
+def _normalized_source_category(
+    raw: dict,
+    source: str,
+    category: str,
+    title: str,
+) -> tuple[str, str]:
+    """Correct a known Osiris route alias only from structured provenance."""
+    raw_id = str(raw.get("id") or "").strip().lower()
+    raw_url = _text(raw, "url", "link", "feed_url").lower()
+    if source == "gdelt" and raw_id.startswith("gdacs-") and "gdacs.org" in raw_url:
+        normalized_title = title.lower()
+        normalized_category = (
+            "hurricane"
+            if "cyclone" in normalized_title
+            or "hurricane" in normalized_title
+            or "typhoon" in normalized_title
+            else "disaster"
+        )
+        return "gdacs", normalized_category
+    return source, category
+
+
 def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
     title = _text(d, "title", "name", "headline", "question", "html", "place")
     mag = d.get("magnitude") or d.get("mag")
@@ -153,11 +175,17 @@ def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
         except (TypeError, ValueError):
             pass
     lat, lng = _coord(d)
+    event_category = (
+        category if source == "polymarket" else (_text(d, "category") or category)
+    )
+    event_source, event_category = _normalized_source_category(
+        d, source, event_category, title
+    )
     return WorldEvent(
         title=title[:240],
         summary=summary[:2000],
-        category=(category if source == "polymarket" else (_text(d, "category") or category)),
-        source=source,
+        category=event_category,
+        source=event_source,
         lat=lat,
         lng=lng,
         url=_text(d, "url", "link", "feed_url"),

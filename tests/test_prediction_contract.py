@@ -10,7 +10,7 @@ from unittest.mock import patch
 from engine.ledger import Ledger
 from engine.models import AgentView, Prediction, WorldEvent
 from engine.oracle import Oracle
-from engine.osiris_intake import _stable_event_id
+from engine.osiris_intake import _normalized_source_category, _stable_event_id
 from engine.swarm import _ask, deliberate
 from engine.world_state import build_brief
 
@@ -41,6 +41,63 @@ class PredictionContractTests(unittest.TestCase):
         self.assertIn("[evt_0123456789abcdef]", brief.text)
         self.assertEqual(brief.visible_event_ids, [event.id])
         self.assertEqual(brief.visible_event_titles[event.id], event.title)
+
+    def test_brief_reserves_dynamic_domain_coverage_before_feed_depth(self) -> None:
+        infrastructure = [
+            WorldEvent(
+                id=f"evt_{index:016x}",
+                title=f"Static facility {index}",
+                category="infrastructure",
+                source="infra",
+                salience=1.0,
+            )
+            for index in range(80)
+        ]
+        conflict = WorldEvent(
+            id="evt_ffffffffffffffff",
+            title="Verified conflict escalation",
+            category="conflict",
+            source="conflicts",
+            salience=0.8,
+        )
+        health = WorldEvent(
+            id="evt_eeeeeeeeeeeeeeee",
+            title="WHO outbreak update",
+            category="health",
+            source="who",
+            salience=0.8,
+        )
+
+        brief = build_brief(infrastructure + [conflict, health])
+
+        self.assertLessEqual(len(brief.text), 6500)
+        self.assertIn(conflict.id, brief.visible_event_ids)
+        self.assertIn(health.id, brief.visible_event_ids)
+        self.assertLess(brief.text.index("[CONFLICT]"), brief.text.index("[INFRASTRUCTURE]"))
+
+    def test_structured_gdacs_alias_cannot_masquerade_as_geopolitical(self) -> None:
+        raw = {
+            "id": "gdacs-117",
+            "url": "https://www.gdacs.org/report.aspx?eventtype=TC&id=1",
+        }
+        self.assertEqual(
+            _normalized_source_category(
+                raw,
+                "gdelt",
+                "geopolitical",
+                "Red notification for tropical cyclone BAVI-26",
+            ),
+            ("gdacs", "hurricane"),
+        )
+        self.assertEqual(
+            _normalized_source_category(
+                {"id": "gdelt-117", "url": "https://example.org"},
+                "gdelt",
+                "geopolitical",
+                "Cyclone mentioned in a diplomatic article",
+            ),
+            ("gdelt", "geopolitical"),
+        )
 
     def test_parse_requires_known_lineage_and_caps_each_horizon(self) -> None:
         event_id = "evt_0123456789abcdef"
