@@ -93,7 +93,7 @@ No API keys. No accounts. No cost.
 
 ## How a forecast is made
 
-1. **Sense** — the engine pulls every live feed concurrently and fuses them into a coverage-balanced world brief, reserving visibility for each domain before adding depth so a large static feed cannot crowd dynamic signals out. A known structured GDACS route alias is normalized from its source id and URL rather than guessed from prose.
+1. **Sense** — the engine pulls every live feed concurrently and fuses them into a coverage-balanced world brief, reserving visibility for each domain before adding depth so a large static feed cannot crowd dynamic signals out. A known structured GDACS route alias is normalized from its source id and URL rather than guessed from prose, and its Red/Orange/Green alert level is preserved in `raw.alert` for downstream policy.
 2. **Draft** — the local LLM reads the brief and drafts concrete, *located* predictions across four horizons (24h · week · month · year), each with a probability, reasoning, trajectory, and exact ids for the observed events that drove it. Unknown event ids are discarded and output is capped per horizon before deliberation.
 3. **Deliberate** — the persona swarm re-scores every retained forecast; incomplete replies are retried, all forecasts are covered in bounded batches, and consensus, dissent, and splits are computed.
 4. **Surface** — predictions land on the deck and the globe; click one to fly there and read the full deliberation.

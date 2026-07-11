@@ -10,7 +10,11 @@ from unittest.mock import patch
 from engine.ledger import Ledger
 from engine.models import AgentView, Prediction, WorldEvent
 from engine.oracle import Oracle
-from engine.osiris_intake import _normalized_source_category, _stable_event_id
+from engine.osiris_intake import (
+    _gdacs_alert_level,
+    _normalized_source_category,
+    _stable_event_id,
+)
 from engine.swarm import _ask, deliberate
 from engine.world_state import build_brief
 
@@ -97,6 +101,16 @@ class PredictionContractTests(unittest.TestCase):
                 "Cyclone mentioned in a diplomatic article",
             ),
             ("gdelt", "geopolitical"),
+        )
+        self.assertEqual(
+            _gdacs_alert_level(raw, "Red notification for tropical cyclone BAVI-26"),
+            "red",
+        )
+        self.assertEqual(
+            _gdacs_alert_level(
+                {"alert": "Orange"}, "A title with no severity adjective"
+            ),
+            "orange",
         )
 
     def test_parse_requires_known_lineage_and_caps_each_horizon(self) -> None:

@@ -155,6 +155,19 @@ def _normalized_source_category(
     return source, category
 
 
+def _gdacs_alert_level(raw: dict, title: str) -> str:
+    explicit = _text(raw, "alert").strip().lower()
+    if explicit in {"red", "orange", "green"}:
+        return explicit
+    normalized_title = title.strip().lower()
+    for level in ("red", "orange", "green"):
+        if normalized_title.startswith(f"[{level}]") or normalized_title.startswith(
+            f"{level} notification"
+        ) or normalized_title.startswith(f"{level} alert"):
+            return level
+    return ""
+
+
 def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
     title = _text(d, "title", "name", "headline", "question", "html", "place")
     mag = d.get("magnitude") or d.get("mag")
@@ -181,6 +194,11 @@ def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
     event_source, event_category = _normalized_source_category(
         d, source, event_category, title
     )
+    raw_payload = {key: d[key] for key in list(d)[:25]}
+    if event_source == "gdacs":
+        alert = _gdacs_alert_level(d, title)
+        if alert:
+            raw_payload["alert"] = alert
     return WorldEvent(
         title=title[:240],
         summary=summary[:2000],
@@ -190,7 +208,7 @@ def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
         lng=lng,
         url=_text(d, "url", "link", "feed_url"),
         salience=_salience(title, summary, d),
-        raw={k: d[k] for k in list(d)[:25]},
+        raw=raw_payload,
     )
 
 
@@ -272,6 +290,11 @@ def _gdacs_events(data: dict) -> list[WorldEvent]:
             category="disaster", source="gdacs",
             lat=_f(e.get("lat")), lng=_f(e.get("lng")), url=e.get("url") or "",
             salience=sal.get(e.get("alert"), 0.45),
+            raw={
+                "alert": str(e.get("alert") or "").strip().lower(),
+                "event_id": e.get("id") or e.get("event_id"),
+                "type": e.get("type"),
+            },
         ))
     return out
 
