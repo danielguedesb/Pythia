@@ -161,9 +161,8 @@ def _gdacs_alert_level(raw: dict, title: str) -> str:
         return explicit
     normalized_title = title.strip().lower()
     for level in ("red", "orange", "green"):
-        if normalized_title.startswith(f"[{level}]") or normalized_title.startswith(
-            f"{level} notification"
-        ) or normalized_title.startswith(f"{level} alert"):
+        first_token = normalized_title.split(maxsplit=1)[0].strip("[]:")
+        if first_token == level:
             return level
     return ""
 

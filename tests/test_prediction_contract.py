@@ -107,6 +107,10 @@ class PredictionContractTests(unittest.TestCase):
             "red",
         )
         self.assertEqual(
+            _gdacs_alert_level(raw, "Green flood alert in Bangladesh"),
+            "green",
+        )
+        self.assertEqual(
             _gdacs_alert_level(
                 {"alert": "Orange"}, "A title with no severity adjective"
             ),
