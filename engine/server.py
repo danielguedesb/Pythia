@@ -129,7 +129,7 @@ async def swarm_model_set(payload: dict = Body(...)):
 
 @app.get("/predictions")
 async def predictions(horizon: str | None = None, min_probability: float = 0.0):
-    """Current forecasts, optionally filtered by `horizon` (24h|week|month|year)
+    """Current forecasts, optionally filtered by `horizon` (24h|week)
     and `min_probability` (0..1)."""
     preds = [p for p in STATE.predictions
              if (not horizon or p.horizon == horizon) and p.probability >= min_probability]

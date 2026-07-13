@@ -37,6 +37,11 @@ def _mirofish_env() -> dict:
 
 _MF = _mirofish_env()
 
+# Meridian's event sleeve can act only on short-horizon forecasts. Keep the
+# producer contract equally narrow so longer-horizon output never enters the
+# executable evidence feed.
+ADMITTED_HORIZONS = ("24h", "week")
+
 
 def _i(name: str, default: int) -> int:
     try:
@@ -56,6 +61,20 @@ def _b(name: str, default: bool) -> bool:
     return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _horizons() -> list[str]:
+    requested = {
+        horizon.strip()
+        for horizon in os.environ.get("HORIZONS", ",".join(ADMITTED_HORIZONS)).split(",")
+        if horizon.strip()
+    }
+    selected = [horizon for horizon in ADMITTED_HORIZONS if horizon in requested]
+    if not selected:
+        raise ValueError(
+            "HORIZONS must include at least one admitted horizon: 24h, week"
+        )
+    return selected
+
+
 @dataclass
 class Config:
     root: Path = _ROOT
@@ -73,7 +92,7 @@ class Config:
     request_timeout: int = field(default_factory=lambda: _i("ORACLE_TIMEOUT_SEC", 180))
 
     # ── Prediction behaviour ──
-    horizons: list[str] = field(default_factory=lambda: [h.strip() for h in os.environ.get("HORIZONS", "24h,week,month,year").split(",") if h.strip()])
+    horizons: list[str] = field(default_factory=_horizons)
     predictions_per_horizon: int = field(default_factory=lambda: _i("PREDICTIONS_PER_HORIZON", 3))
     loop_interval_sec: int = field(default_factory=lambda: _i("LOOP_INTERVAL_SEC", 900))
     sense_interval_sec: int = field(default_factory=lambda: _i("SENSE_INTERVAL_SEC", 180))

@@ -5,10 +5,11 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from engine.config import Config
 from engine.ledger import Ledger
-from engine.models import AgentView, Prediction, WorldEvent
+from engine.models import AgentView, Prediction, WorldBrief, WorldEvent
 from engine.oracle import Oracle
 from engine.osiris_intake import (
     _gdacs_alert_level,
@@ -117,14 +118,40 @@ class PredictionContractTests(unittest.TestCase):
             "orange",
         )
 
-    def test_parse_requires_known_lineage_and_caps_each_horizon(self) -> None:
+    def test_config_clamps_generation_to_meridian_horizons(self) -> None:
+        with patch.dict("os.environ", {"HORIZONS": "year,week,month,24h"}):
+            self.assertEqual(Config().horizons, ["24h", "week"])
+
+    def test_config_rejects_horizons_outside_meridian_contract(self) -> None:
+        with (
+            patch.dict("os.environ", {"HORIZONS": "month,year"}),
+            self.assertRaisesRegex(ValueError, "HORIZONS"),
+        ):
+            Config()
+
+    def test_prompt_requests_one_driver_and_only_admitted_horizons(self) -> None:
+        brief = WorldBrief(
+            event_count=1,
+            text="[evt_0123456789abcdef] Observed signal",
+        )
+        with patch("engine.oracle.CONFIG.horizons", ["24h", "week"]):
+            prompt = Oracle()._prompt(brief)
+
+        self.assertIn("exactly ONE event id", prompt)
+        self.assertIn('"horizon": <one of "24h", "week">', prompt)
+        self.assertNotIn("1 to 3 event ids", prompt)
+        self.assertNotIn('"month"', prompt)
+        self.assertNotIn('"year"', prompt)
+
+    def test_parse_requires_one_known_driver_and_caps_each_horizon(self) -> None:
         event_id = "evt_0123456789abcdef"
+        second_event_id = "evt_1111111111111111"
         payload = [
             {
-                "statement": "first",
+                "statement": "ambiguous lineage",
                 "horizon": "24h",
                 "probability": 70,
-                "driver_event_ids": [event_id, "evt_unknown"],
+                "driver_event_ids": [event_id, second_event_id],
                 "trajectory": "continuation",
             },
             {
@@ -133,6 +160,13 @@ class PredictionContractTests(unittest.TestCase):
                 "probability": 80,
                 "driver_event_ids": [event_id],
                 "trajectory": "escalation",
+            },
+            {
+                "statement": "long horizon",
+                "horizon": "month",
+                "probability": 90,
+                "driver_event_ids": [event_id],
+                "trajectory": "continuation",
             },
             {
                 "statement": "fabricated lineage",
@@ -149,10 +183,13 @@ class PredictionContractTests(unittest.TestCase):
             predictions = Oracle._parse(
                 json.dumps(payload),
                 "brief_1",
-                driver_titles={event_id: "Observed signal"},
+                driver_titles={
+                    event_id: "Observed signal",
+                    second_event_id: "Unrelated signal",
+                },
             )
 
-        self.assertEqual([prediction.statement for prediction in predictions], ["first"])
+        self.assertEqual([prediction.statement for prediction in predictions], ["second"])
         self.assertEqual(predictions[0].contract_version, 2)
         self.assertEqual(predictions[0].driver_event_ids, [event_id])
         self.assertEqual(predictions[0].drivers, ["Observed signal"])
@@ -185,6 +222,89 @@ class PredictionContractTests(unittest.TestCase):
         self.assertEqual(restored["drivers"], prediction.drivers)
         self.assertEqual(restored["trajectory"], "continuation")
         self.assertEqual(restored["agents"][0]["note"], prediction.agents[0].note)
+
+    def test_hydration_exposes_only_admitted_single_driver_v2_forecasts(self) -> None:
+        from engine.pipeline import hydrate_from_ledger
+        from engine.state import STATE
+
+        event_id = "evt_0123456789abcdef"
+        base = {
+            "probability": 0.7,
+            "contract_version": 2,
+            "driver_event_ids": [event_id],
+            "trajectory": "continuation",
+            "ts": 1_720_000_000_000,
+        }
+        rows = [
+            {**base, "id": "pred_valid", "statement": "valid", "horizon": "week"},
+            {
+                **base,
+                "id": "pred_ambiguous",
+                "statement": "ambiguous",
+                "horizon": "24h",
+                "driver_event_ids": [event_id, "evt_1111111111111111"],
+            },
+            {
+                **base,
+                "id": "pred_long",
+                "statement": "long",
+                "horizon": "month",
+            },
+            {
+                **base,
+                "id": "pred_legacy",
+                "statement": "legacy",
+                "horizon": "24h",
+                "contract_version": 1,
+            },
+        ]
+        previous = STATE.predictions
+        try:
+            STATE.predictions = []
+            with (
+                patch("engine.runtime.ledger.open_recent", return_value=rows),
+                patch("engine.config.CONFIG.horizons", ["24h", "week"]),
+            ):
+                count = hydrate_from_ledger()
+
+            self.assertEqual(count, 1)
+            self.assertEqual([prediction.id for prediction in STATE.predictions], ["pred_valid"])
+        finally:
+            STATE.predictions = previous
+
+
+class WhatIfContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_what_if_requests_and_exposes_only_admitted_horizons(self) -> None:
+        response = {
+            "narrative": "Conditional chain",
+            "predictions": [
+                {
+                    "statement": "short consequence",
+                    "horizon": "week",
+                    "probability": 65,
+                },
+                {
+                    "statement": "long consequence",
+                    "horizon": "month",
+                    "probability": 75,
+                },
+            ],
+        }
+        oracle = Oracle()
+        complete = AsyncMock(return_value=json.dumps(response))
+        with (
+            patch.object(oracle, "_complete", complete),
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+        ):
+            result = await oracle.what_if("A hypothetical event", None)
+
+        prompt = complete.await_args.args[0][-1]["content"]
+        self.assertIn('"horizon": "24h"|"week"', prompt)
+        self.assertNotIn('"month"', prompt)
+        self.assertEqual(
+            [prediction["statement"] for prediction in result["predictions"]],
+            ["short consequence"],
+        )
 
 
 class SwarmCompletenessTests(unittest.IsolatedAsyncioTestCase):

@@ -18,19 +18,35 @@ _lock = asyncio.Lock()
 def hydrate_from_ledger() -> int:
     """Wake up remembering: reload still-live forecasts from the ledger so the
     deck and rings aren't blank while the first pass runs."""
+    from .config import CONFIG
     from .models import AgentView
     from .runtime import ledger
     if STATE.predictions:
         return 0
     preds = []
     for f in ledger.open_recent():
+        raw_driver_ids = f.get("driver_event_ids")
+        driver_event_ids = (
+            [raw_driver_ids[0].strip()]
+            if isinstance(raw_driver_ids, list)
+            and len(raw_driver_ids) == 1
+            and isinstance(raw_driver_ids[0], str)
+            else []
+        )
+        if (
+            f.get("horizon") not in CONFIG.horizons
+            or f.get("contract_version") != 2
+            or not driver_event_ids
+            or not driver_event_ids[0].startswith("evt_")
+        ):
+            continue
         preds.append(Prediction(
             id=f["id"], statement=f["statement"], horizon=f["horizon"],
             probability=f["probability"], base_probability=f.get("base_probability"),
             contract_version=int(f.get("contract_version") or 1),
             reasoning=f.get("reasoning") or "", location=f.get("location") or "",
             drivers=list(f.get("drivers") or []),
-            driver_event_ids=list(f.get("driver_event_ids") or []),
+            driver_event_ids=driver_event_ids,
             trajectory=f.get("trajectory") or "other",
             lat=f.get("lat"), lng=f.get("lng"), split=bool(f.get("split")),
             agents=[AgentView(**a) for a in f.get("agents", [])],

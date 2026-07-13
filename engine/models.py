@@ -55,12 +55,12 @@ class Prediction(BaseModel):
     """A single forecast from the oracle about a future event."""
     id: str = Field(default_factory=lambda: _id("pred"))
     statement: str
-    horizon: str                        # 24h | week | month | year
+    horizon: str                        # 24h | week
     probability: float                  # 0..1 (consensus after swarm deliberation)
     contract_version: int = 1           # v2 adds verifiable event lineage
     reasoning: str = ""
     drivers: list[str] = Field(default_factory=list)   # signals that informed it
-    driver_event_ids: list[str] = Field(default_factory=list)
+    driver_event_ids: list[str] = Field(default_factory=list)  # v2: exactly one
     trajectory: Literal["escalation", "continuation", "resolution", "other"] = "other"
     location: str = ""                  # human place name (e.g. "Strait of Hormuz")
     lat: Optional[float] = None         # approx coords so the UI can fly there

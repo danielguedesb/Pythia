@@ -23,8 +23,7 @@ SYSTEM = (
     "events. Be specific, plausible, and grounded in the snapshot. Output strictly JSON."
 )
 
-_HORIZON_LABEL = {"24h": "the next 24 hours", "week": "the next week",
-                  "month": "the next month", "year": "the next year"}
+_HORIZON_LABEL = {"24h": "the next 24 hours", "week": "the next week"}
 
 
 def _norm_horizon(h: str) -> str:
@@ -83,13 +82,14 @@ class Oracle:
             f"or novelty market questions. Treat raw news as unverified unless another independent "
             f"signal supports it. A market question resolving beyond a horizon cannot drive that horizon.\n"
             f"Give {CONFIG.predictions_per_horizon} concrete predictions for EACH horizon ({spans}).\n"
-            f"Each prediction MUST cite 1 to 3 event ids copied exactly from the bracketed ids "
+            f"Each prediction MUST cite exactly ONE event id copied from the bracketed ids "
             f"in the snapshot. trajectory describes whether the predicted event is an escalation, "
-            f"continuation, or resolution of those cited signals; use other only when none applies.\n"
+            f"continuation, or resolution of that one cited signal; use other only when none applies. "
+            f"Do not combine independent signals in one prediction.\n"
             f"Return ONLY a JSON array. Each element exactly:\n"
             f'{{"statement": "<specific predicted event>", "horizon": <one of {horizons}>, '
             f'"probability": <integer 0-100>, "reasoning": "<one sentence grounded in the snapshot>", '
-            f'"driver_event_ids": ["<1-3 exact bracketed event ids>"], '
+            f'"driver_event_ids": ["<one exact bracketed event id>"], '
             f'"trajectory": "escalation"|"continuation"|"resolution"|"other", '
             f'"location": "<the place this is about, e.g. Strait of Hormuz>", '
             f'"lat": <approx latitude or null>, "lng": <approx longitude or null>}}\n'
@@ -242,18 +242,21 @@ class Oracle:
             lng = None
         raw_driver_ids = it.get("driver_event_ids")
         driver_event_ids: list[str] = []
-        if isinstance(raw_driver_ids, list):
+        if driver_titles is not None:
+            if not isinstance(raw_driver_ids, list) or len(raw_driver_ids) != 1:
+                return None
+            event_id = str(raw_driver_ids[0]).strip()
+            if not event_id or event_id not in driver_titles:
+                return None
+            driver_event_ids.append(event_id)
+        elif isinstance(raw_driver_ids, list):
             for raw_id in raw_driver_ids:
                 event_id = str(raw_id).strip()
                 if not event_id or event_id in driver_event_ids:
                     continue
-                if driver_titles is not None and event_id not in driver_titles:
-                    continue
                 driver_event_ids.append(event_id)
-                if len(driver_event_ids) >= 3:
+                if len(driver_event_ids) >= 1:
                     break
-        if driver_titles is not None and not driver_event_ids:
-            return None
         trajectory = str(it.get("trajectory") or "other").strip().lower()
         if trajectory not in {"escalation", "continuation", "resolution", "other"}:
             trajectory = "other"
@@ -322,13 +325,14 @@ class Oracle:
         """Counterfactual mode: inject a hypothetical event into the live world and
         forecast the knock-on effects. Ephemeral — nothing is stored or ledgered."""
         base = (brief.text if brief else "(no live world data loaded)")[:4000]
+        horizons = "|".join(f'"{horizon}"' for horizon in CONFIG.horizons)
         prompt = (
             f"=== LIVE WORLD SNAPSHOT ===\n{base}\n\n"
             f"=== HYPOTHETICAL EVENT (assume it just happened) ===\n{scenario.strip()[:400]}\n\n"
             "Reason through the knock-on consequences, grounded in the real snapshot above.\n"
             "Return ONLY JSON:\n"
             '{"narrative": "<3-4 sentences tracing the chain of consequences>", "predictions": ['
-            '{"statement": "<concrete knock-on event>", "horizon": "24h"|"week"|"month", '
+            f'{{"statement": "<concrete knock-on event>", "horizon": {horizons}, '
             '"probability": <integer 0-100, conditional on the hypothetical>, '
             '"reasoning": "<one sentence>", "location": "<place>", "lat": <or null>, "lng": <or null>}'
             ", ... 4 to 6 predictions]}\nJSON only — no markdown, no commentary."
@@ -343,7 +347,13 @@ class Oracle:
                 continue
             if isinstance(d, dict) and isinstance(d.get("predictions"), list):
                 narrative = str(d.get("narrative", "")).strip()[:900]
-                preds = [p for p in (self._clean_pred(it, "") for it in d["predictions"]) if p]
+                preds = [
+                    prediction
+                    for prediction in (
+                        self._clean_pred(item, "") for item in d["predictions"]
+                    )
+                    if prediction and prediction.horizon in CONFIG.horizons
+                ]
                 break
         if not preds:   # model skipped the wrapper and emitted bare prediction objects
             preds = self._parse(text, "")
