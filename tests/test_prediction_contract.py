@@ -4,6 +4,7 @@ import json
 import re
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -20,7 +21,7 @@ from engine.swarm import _ask, deliberate
 from engine.world_state import build_brief
 
 
-class PredictionContractTests(unittest.TestCase):
+class PredictionContractTests(unittest.IsolatedAsyncioTestCase):
     def test_event_ids_are_stable_within_day_and_roll_next_day(self) -> None:
         first = WorldEvent(
             title="Missile strike reported",
@@ -129,19 +130,90 @@ class PredictionContractTests(unittest.TestCase):
         ):
             Config()
 
-    def test_prompt_requests_one_driver_and_only_admitted_horizons(self) -> None:
+    def test_default_generation_quota_is_eight_per_horizon(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(Config().predictions_per_horizon, 8)
+
+    def test_prompt_requests_one_driver_and_exactly_one_horizon(self) -> None:
         brief = WorldBrief(
             event_count=1,
             text="[evt_0123456789abcdef] Observed signal",
         )
-        with patch("engine.oracle.CONFIG.horizons", ["24h", "week"]):
-            prompt = Oracle()._prompt(brief)
+        with (
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+            patch("engine.oracle.CONFIG.predictions_per_horizon", 8),
+        ):
+            prompt = Oracle()._prompt(brief, "24h")
 
+        self.assertIn(
+            'Give 8 concrete predictions for exactly ONE horizon: "24h"',
+            prompt,
+        )
         self.assertIn("exactly ONE event id", prompt)
-        self.assertIn('"horizon": <one of "24h", "week">', prompt)
+        self.assertIn('"horizon": "24h"', prompt)
+        self.assertNotIn('"horizon": "week"', prompt)
         self.assertNotIn("1 to 3 event ids", prompt)
         self.assertNotIn('"month"', prompt)
         self.assertNotIn('"year"', prompt)
+
+    async def test_predict_calls_each_horizon_and_combines_eight_each(self) -> None:
+        event_id = "evt_0123456789abcdef"
+        brief = WorldBrief(
+            event_count=1,
+            text=f"[{event_id}] Observed signal",
+            visible_event_ids=[event_id],
+            visible_event_titles={event_id: "Observed signal"},
+        )
+
+        def response(horizon: str, wrong_horizon: str) -> str:
+            return json.dumps([
+                {
+                    "statement": f"{horizon} prediction {index}",
+                    "horizon": horizon,
+                    "probability": 70,
+                    "driver_event_ids": [event_id],
+                    "trajectory": "continuation",
+                }
+                for index in range(9)
+            ] + [{
+                "statement": f"wrong horizon from {horizon} call",
+                "horizon": wrong_horizon,
+                "probability": 70,
+                "driver_event_ids": [event_id],
+                "trajectory": "continuation",
+            }])
+
+        oracle = Oracle()
+        complete = AsyncMock(side_effect=[
+            response("24h", "week"),
+            response("week", "24h"),
+        ])
+        with (
+            patch.object(oracle, "_chat", complete),
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+            patch("engine.oracle.CONFIG.predictions_per_horizon", 8),
+        ):
+            predictions = await oracle.predict(brief)
+
+        self.assertEqual(complete.await_count, 2)
+        prompts = [call.args[0] for call in complete.await_args_list]
+        self.assertIn('exactly ONE horizon: "24h"', prompts[0])
+        self.assertNotIn('"horizon": "week"', prompts[0])
+        self.assertIn('exactly ONE horizon: "week"', prompts[1])
+        self.assertNotIn('"horizon": "24h"', prompts[1])
+        self.assertEqual(
+            Counter(prediction.horizon for prediction in predictions),
+            {"24h": 8, "week": 8},
+        )
+        self.assertEqual(len(predictions), 16)
+        self.assertNotIn(
+            "wrong horizon from 24h call",
+            {prediction.statement for prediction in predictions},
+        )
+        self.assertNotIn(
+            "wrong horizon from week call",
+            {prediction.statement for prediction in predictions},
+        )
 
     def test_parse_requires_one_known_driver_and_caps_each_horizon(self) -> None:
         event_id = "evt_0123456789abcdef"
@@ -193,6 +265,36 @@ class PredictionContractTests(unittest.TestCase):
         self.assertEqual(predictions[0].contract_version, 2)
         self.assertEqual(predictions[0].driver_event_ids, [event_id])
         self.assertEqual(predictions[0].drivers, ["Observed signal"])
+
+    def test_parse_admits_eight_predictions_per_horizon(self) -> None:
+        event_id = "evt_0123456789abcdef"
+        payload = [
+            {
+                "statement": f"{horizon} prediction {index}",
+                "horizon": horizon,
+                "probability": 70,
+                "driver_event_ids": [event_id],
+                "trajectory": "continuation",
+            }
+            for horizon in ("24h", "week")
+            for index in range(9)
+        ]
+        with (
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+            patch("engine.oracle.CONFIG.predictions_per_horizon", 8),
+        ):
+            predictions = Oracle._parse(
+                json.dumps(payload),
+                "brief_1",
+                driver_titles={event_id: "Observed signal"},
+            )
+
+        self.assertEqual(Counter(prediction.horizon for prediction in predictions), {
+            "24h": 8,
+            "week": 8,
+        })
+        self.assertNotIn("24h prediction 8", {p.statement for p in predictions})
+        self.assertNotIn("week prediction 8", {p.statement for p in predictions})
 
     def test_ledger_round_trip_preserves_v2_lineage_and_agent_note(self) -> None:
         prediction = Prediction(

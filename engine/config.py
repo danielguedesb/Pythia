@@ -93,7 +93,7 @@ class Config:
 
     # ── Prediction behaviour ──
     horizons: list[str] = field(default_factory=_horizons)
-    predictions_per_horizon: int = field(default_factory=lambda: _i("PREDICTIONS_PER_HORIZON", 3))
+    predictions_per_horizon: int = field(default_factory=lambda: _i("PREDICTIONS_PER_HORIZON", 8))
     loop_interval_sec: int = field(default_factory=lambda: _i("LOOP_INTERVAL_SEC", 900))
     sense_interval_sec: int = field(default_factory=lambda: _i("SENSE_INTERVAL_SEC", 180))
     # max events kept per sensing pass after salience-ranking. Higher = quieter domains

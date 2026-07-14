@@ -5,6 +5,7 @@ No Zep, no cloud, no cost.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -65,9 +66,10 @@ class Oracle:
         except Exception:  # noqa: BLE001
             return []
 
-    def _prompt(self, brief: WorldBrief) -> str:
-        horizons = ", ".join(f'"{h}"' for h in CONFIG.horizons)
-        spans = "; ".join(f"{h} = {_HORIZON_LABEL.get(h, h)}" for h in CONFIG.horizons)
+    def _prompt(self, brief: WorldBrief, horizon: str) -> str:
+        if horizon not in CONFIG.horizons:
+            raise ValueError(f"unsupported prediction horizon: {horizon}")
+        span = _HORIZON_LABEL.get(horizon, horizon)
         today = datetime.now(timezone.utc).strftime("%A, %Y-%m-%d")
         return (
             f"=== TODAY IS {today} (UTC) — every prediction is about the future "
@@ -81,13 +83,14 @@ class Oracle:
             f"Prefer dynamic, corroborated changes over static status entries, repetitive headlines, "
             f"or novelty market questions. Treat raw news as unverified unless another independent "
             f"signal supports it. A market question resolving beyond a horizon cannot drive that horizon.\n"
-            f"Give {CONFIG.predictions_per_horizon} concrete predictions for EACH horizon ({spans}).\n"
+            f"Give {CONFIG.predictions_per_horizon} concrete predictions for exactly ONE horizon: "
+            f'"{horizon}" ({span}).\n'
             f"Each prediction MUST cite exactly ONE event id copied from the bracketed ids "
             f"in the snapshot. trajectory describes whether the predicted event is an escalation, "
             f"continuation, or resolution of that one cited signal; use other only when none applies. "
             f"Do not combine independent signals in one prediction.\n"
             f"Return ONLY a JSON array. Each element exactly:\n"
-            f'{{"statement": "<specific predicted event>", "horizon": <one of {horizons}>, '
+            f'{{"statement": "<specific predicted event>", "horizon": "{horizon}", '
             f'"probability": <integer 0-100>, "reasoning": "<one sentence grounded in the snapshot>", '
             f'"driver_event_ids": ["<one exact bracketed event id>"], '
             f'"trajectory": "escalation"|"continuation"|"resolution"|"other", '
@@ -97,15 +100,31 @@ class Oracle:
         )
 
     async def predict(self, brief: WorldBrief, on_stage: StageCB = None) -> list[Prediction]:
-        if on_stage:
-            await on_stage("thinking", f"asking {self.model}")
-        text = await self._chat(self._prompt(brief))
         driver_titles = {
             event_id: brief.visible_event_titles[event_id]
             for event_id in brief.visible_event_ids
             if event_id in brief.visible_event_titles
         }
-        preds = self._parse(text, brief.id, driver_titles=driver_titles)
+        horizons = list(CONFIG.horizons)
+        if on_stage:
+            await on_stage("thinking", f"asking {self.model} for {', '.join(horizons)}")
+        responses = await asyncio.gather(*(
+            self._chat(self._prompt(brief, horizon)) for horizon in horizons
+        ))
+        preds: list[Prediction] = []
+        for horizon, text in zip(horizons, responses):
+            horizon_preds = [
+                prediction
+                for prediction in self._parse(
+                    text,
+                    brief.id,
+                    driver_titles=driver_titles,
+                )
+                if prediction.horizon == horizon
+            ]
+            if not horizon_preds:
+                log.warning("oracle: no %s predictions admitted", horizon)
+            preds.extend(horizon_preds)
         log.info("oracle produced %d predictions", len(preds))
         return preds
 
