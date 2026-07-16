@@ -262,13 +262,23 @@ async def chat(payload: dict = Body(...)):
     if not msg:
         raise HTTPException(400, "provide `message`")
     brief = STATE.world
+    chat_events = STATE.events
     if brief is None:
         try:
-            brief = build_brief(await intake.fetch(limit=150))
+            fetched_events = await intake.fetch(limit=150)
+            brief = build_brief(fetched_events)
             STATE.set_world(brief)
+            if not chat_events:
+                chat_events = fetched_events
         except Exception:  # noqa: BLE001
             brief = None
-    answer = await oracle.chat(msg, brief, STATE.predictions, payload.get("history", []))
+    answer = await oracle.chat(
+        msg,
+        brief,
+        STATE.predictions,
+        payload.get("history", []),
+        events=chat_events,
+    )
     return {"answer": answer}
 
 

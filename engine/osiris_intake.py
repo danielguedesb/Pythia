@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import re
 from datetime import datetime, timezone
 
@@ -133,6 +134,42 @@ def _salience(title: str, summary: str, raw: dict) -> float:
     return round(min(1.0, score), 2)
 
 
+def _earthquake_salience(raw: dict) -> float:
+    """Rank USGS earthquakes primarily by magnitude, not place-name words."""
+    try:
+        magnitude = float(raw.get("magnitude", raw.get("mag")))
+    except (TypeError, ValueError):
+        magnitude = 0.0
+    if not math.isfinite(magnitude):
+        magnitude = 0.0
+    score = min(1.0, max(0.4, 0.4 + (magnitude - 2.5) * (0.6 / 4.5)))
+
+    alert = str(raw.get("alert") or "").strip().lower()
+    score = max(score, {"yellow": 0.8, "orange": 0.9, "red": 1.0}.get(alert, 0.0))
+    if str(raw.get("tsunami") or "").strip().lower() in {"1", "true", "yes"}:
+        score = 1.0
+    risk_score = raw.get("risk_score") or raw.get("severity_score")
+    if isinstance(risk_score, (int, float)):
+        score = max(
+            score,
+            min(1.0, float(risk_score) / (100.0 if risk_score > 1 else 1.0)),
+        )
+    return round(score, 2)
+
+
+def _earthquake_occurrence_ms(raw: dict) -> int | None:
+    """Return the USGS occurrence epoch, accepting seconds or milliseconds."""
+    try:
+        timestamp = float(raw.get("time"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        return None
+    if timestamp < 100_000_000_000:
+        timestamp *= 1000
+    return int(timestamp)
+
+
 def _normalized_source_category(
     raw: dict,
     source: str,
@@ -198,16 +235,24 @@ def _to_event(d: dict, source: str, category: str) -> WorldEvent | None:
         alert = _gdacs_alert_level(d, title)
         if alert:
             raw_payload["alert"] = alert
+    event_fields = {
+        "title": title[:240],
+        "summary": summary[:2000],
+        "category": event_category,
+        "source": event_source,
+        "lat": lat,
+        "lng": lng,
+        "url": _text(d, "url", "link", "feed_url"),
+        "salience": _salience(title, summary, d),
+        "raw": raw_payload,
+    }
+    if event_source == "usgs" and event_category == "seismic":
+        event_fields["salience"] = _earthquake_salience(d)
+        occurrence_ms = _earthquake_occurrence_ms(d)
+        if occurrence_ms is not None:
+            event_fields["ts"] = occurrence_ms
     return WorldEvent(
-        title=title[:240],
-        summary=summary[:2000],
-        category=event_category,
-        source=event_source,
-        lat=lat,
-        lng=lng,
-        url=_text(d, "url", "link", "feed_url"),
-        salience=_salience(title, summary, d),
-        raw=raw_payload,
+        **event_fields,
     )
 
 
