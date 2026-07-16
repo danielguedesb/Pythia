@@ -289,6 +289,80 @@ class PredictionContractTests(unittest.IsolatedAsyncioTestCase):
             {prediction.statement for prediction in predictions},
         )
 
+    async def test_predict_retries_an_empty_horizon_once(self) -> None:
+        event_id = "evt_0123456789abcdef"
+        brief = WorldBrief(
+            event_count=1,
+            text=f"[{event_id}] Observed signal",
+            visible_event_ids=[event_id],
+            visible_event_titles={event_id: "Observed signal"},
+        )
+
+        def response(horizon: str) -> str:
+            return json.dumps([{
+                "statement": f"{horizon} prediction",
+                "horizon": horizon,
+                "probability": 70,
+                "driver_event_ids": [event_id],
+                "trajectory": "continuation",
+            }])
+
+        oracle = Oracle()
+        complete = AsyncMock(side_effect=[
+            "not valid forecast JSON",
+            response("week"),
+            response("24h"),
+        ])
+        with (
+            patch.object(oracle, "_chat", complete),
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+        ):
+            predictions = await oracle.predict(brief)
+
+        self.assertEqual(complete.await_count, 3)
+        self.assertEqual(
+            Counter(prediction.horizon for prediction in predictions),
+            {"24h": 1, "week": 1},
+        )
+        self.assertIn('exactly ONE horizon: "24h"', complete.await_args_list[2].args[0])
+
+    async def test_predict_retries_one_failed_horizon_without_losing_the_other(self) -> None:
+        event_id = "evt_0123456789abcdef"
+        brief = WorldBrief(
+            event_count=1,
+            text=f"[{event_id}] Observed signal",
+            visible_event_ids=[event_id],
+            visible_event_titles={event_id: "Observed signal"},
+        )
+
+        def response(horizon: str) -> str:
+            return json.dumps([{
+                "statement": f"{horizon} prediction",
+                "horizon": horizon,
+                "probability": 70,
+                "driver_event_ids": [event_id],
+                "trajectory": "continuation",
+            }])
+
+        oracle = Oracle()
+        complete = AsyncMock(side_effect=[
+            RuntimeError("24h transport failed"),
+            response("week"),
+            response("24h"),
+        ])
+        with (
+            patch.object(oracle, "_chat", complete),
+            patch("engine.oracle.CONFIG.horizons", ["24h", "week"]),
+        ):
+            predictions = await oracle.predict(brief)
+
+        self.assertEqual(complete.await_count, 3)
+        self.assertEqual(
+            Counter(prediction.horizon for prediction in predictions),
+            {"24h": 1, "week": 1},
+        )
+        self.assertIn('exactly ONE horizon: "24h"', complete.await_args_list[2].args[0])
+
     def test_parse_requires_one_known_driver_and_caps_each_horizon(self) -> None:
         event_id = "evt_0123456789abcdef"
         second_event_id = "evt_1111111111111111"

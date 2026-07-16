@@ -186,22 +186,48 @@ class Oracle:
         horizons = list(CONFIG.horizons)
         if on_stage:
             await on_stage("thinking", f"asking {self.model} for {', '.join(horizons)}")
-        responses = await asyncio.gather(*(
-            self._chat(self._prompt(brief, horizon)) for horizon in horizons
-        ))
+        responses = await asyncio.gather(
+            *(self._chat(self._prompt(brief, horizon)) for horizon in horizons),
+            return_exceptions=True,
+        )
         preds: list[Prediction] = []
-        for horizon, text in zip(horizons, responses):
-            horizon_preds = [
-                prediction
-                for prediction in self._parse(
-                    text,
-                    brief.id,
-                    driver_titles=driver_titles,
-                )
-                if prediction.horizon == horizon
-            ]
+        for horizon, response in zip(horizons, responses):
+            if isinstance(response, asyncio.CancelledError):
+                raise response
+            if isinstance(response, BaseException):
+                log.warning("oracle: initial %s request failed: %s", horizon, response)
+                horizon_preds = []
+            else:
+                horizon_preds = [
+                    prediction
+                    for prediction in self._parse(
+                        response,
+                        brief.id,
+                        driver_titles=driver_titles,
+                    )
+                    if prediction.horizon == horizon
+                ]
             if not horizon_preds:
-                log.warning("oracle: no %s predictions admitted", horizon)
+                log.warning(
+                    "oracle: no %s predictions admitted; retrying once",
+                    horizon,
+                )
+                try:
+                    retry_text = await self._chat(self._prompt(brief, horizon))
+                except Exception as exc:  # noqa: BLE001 — retain other horizon
+                    log.warning("oracle: %s retry failed: %s", horizon, exc)
+                else:
+                    horizon_preds = [
+                        prediction
+                        for prediction in self._parse(
+                            retry_text,
+                            brief.id,
+                            driver_titles=driver_titles,
+                        )
+                        if prediction.horizon == horizon
+                    ]
+            if not horizon_preds:
+                log.warning("oracle: no %s predictions admitted after retry", horizon)
             preds.extend(horizon_preds)
         log.info("oracle produced %d predictions", len(preds))
         return preds
